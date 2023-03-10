@@ -131,11 +131,16 @@
                     <sort_list list="$order.$targets" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
                     <sort_list list="$order.$targetsM" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
                     <sort_list list="$order.$targetsL" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
+                    <sort_list list="$order.$targetsXL" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
                     <find_ship_by_true_owner space="player.galaxy" faction="faction.player" multiple="true" name="$otherShips" excluded="$thisShip" />
                     <do_for_each in="$otherShips" name="$otherShip">
                       <do_if value="$otherShip.defaultorder.id == 'WarehouseFleet'">
                         <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Syncing params ' + $thisShip.idcode + ' -> ' + $otherShip.idcode" output="false" append="true" />
                         <edit_order_param order="$otherShip.defaultorder" param="'accountThreshold'" value="$order.$accountThreshold" />
+                        <edit_order_param order="$otherShip.defaultorder" param="'transferToPlayer'" value="$order.$transferToPlayer" />
+                        <edit_order_param order="$otherShip.defaultorder" param="'stationAccountMaxThreshold'" value="$order.$stationAccountMaxThreshold" />
+                        <edit_order_param order="$otherShip.defaultorder" param="'transferToStation'" value="$order.$transferToStation" />
+                        <edit_order_param order="$otherShip.defaultorder" param="'stationAccountMinThreshold'" value="$order.$stationAccountMinThreshold" />
                       </do_if>
                     </do_for_each>
                   </actions>
@@ -221,9 +226,10 @@
         </do_if>
 
         <set_value name="$sourceStation" exact="$order.$sourceStation" />
-        <do_if value="$sourceStation.money gt 200000Cr">
+
+        <do_if value="$order.$transferToPlayer and ($sourceStation.money gt ($order.$stationAccountMaxThreshold * 1000000Cr))">
           <!-- FIXME: Bisschen Geld übrig lassen, damit die Station Waren ankaufen kann? -->
-          <set_value name="$moneyToTransfer" exact="$sourceStation.money" />
+          <set_value name="$moneyToTransfer" exact="$sourceStation.money - ($order.$stationAccountMinThreshold * 1000000Cr)" />
           <write_to_logbook category="upkeep" object="$sourceStation" title="'Warehouse Account'" money="$moneyToTransfer" text="'Transferring credits from ' + $sourceStation.knownname +' (' + $sourceStation.idcode + ')'" />
           <transfer_money from="$sourceStation" to="faction.player" amount="$moneyToTransfer" />
         </do_if>
@@ -251,27 +257,34 @@
             <param name="ship" value="$ship" />
           </run_actions>
         </do_if>
-        <do_if value="$ship.isclass.ship_m or $ship.isclass.ship_l">
+        <do_if value="not $ship.isclass.ship_s">
           <run_actions ref="AddStations">
             <param name="stations" value="$targetStations" />
             <param name="newTargets" value="$order.$targets" />
             <param name="ship" value="$ship" />
           </run_actions>
+          <do_if value="$ship.isclass.ship_m">
+            <run_actions ref="AddStations">
+              <param name="stations" value="$targetStations" />
+              <param name="newTargets" value="$order.$targetsM" />
+              <param name="ship" value="$ship" />
+            </run_actions>
+          </do_if>
+          <do_elseif value="$ship.isclass.ship_l">
+            <run_actions ref="AddStations">
+              <param name="stations" value="$targetStations" />
+              <param name="newTargets" value="$order.$targetsL" />
+              <param name="ship" value="$ship" />
+            </run_actions>
+          </do_elseif>
+          <do_elseif value="$ship.isclass.ship_xl">
+            <run_actions ref="AddStations">
+              <param name="stations" value="$targetStations" />
+              <param name="newTargets" value="$order.$targetsXL" />
+              <param name="ship" value="$ship" />
+            </run_actions>
+          </do_elseif>
         </do_if>
-        <do_if value="$ship.isclass.ship_m">
-          <run_actions ref="AddStations">
-            <param name="stations" value="$targetStations" />
-            <param name="newTargets" value="$order.$targetsM" />
-            <param name="ship" value="$ship" />
-          </run_actions>
-        </do_if>
-        <do_elseif value="$ship.isclass.ship_l">
-          <run_actions ref="AddStations">
-            <param name="stations" value="$targetStations" />
-            <param name="newTargets" value="$order.$targetsL" />
-            <param name="ship" value="$ship" />
-          </run_actions>
-        </do_elseif>
         <remove_from_list name="$targetStations" exact="$sourceStation" />
 
         <!-- Warenliste für Push-Trades erstellen -->

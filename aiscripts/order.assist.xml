@@ -8,6 +8,7 @@
                 <param name="targets" value="$order.$targets" />
                 <param name="targetsM" value="$order.$targetsM" />
                 <param name="targetsL" value="$order.$targetsL" />
+                <param name="targetsXL" value="$order.$targetsXL" />
                 <param name="supplyTargets" value="$order.$supplyTargets" />
                 <param name="prioDistribution" value="$order.$prioDistribution" />
                 <param name="prioTrade" value="$order.$prioTrade" />
@@ -15,6 +16,10 @@
                 <param name="minCargoUsage" value="$order.$minCargoUsage" />
                 <param name="tradeGatePenalty" value="$order.$tradeGatePenalty" />
                 <param name="accountThreshold" value="$order.$accountThreshold" />
+                <param name="transferToPlayer" value="$order.$transferToPlayer" />
+                <param name="stationAccountMaxThreshold" value="$order.$stationAccountMaxThreshold" />
+                <param name="transferToStation" value="$order.$transferToStation" />
+                <param name="stationAccountMinThreshold" value="$order.$stationAccountMinThreshold" />
             </run_script>
         </do_if>
     </add>
