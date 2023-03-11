@@ -1,860 +1,842 @@
 <?xml version="1.0" encoding="utf-8"?>
 <mdscript name="WarehouseFleets" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="C:/Users/mblei/Desktop/unpacked/libraries/md.xsd">
-	<cues>
-		<!-- Startet den Main Cue, falls dieser nicht aktiv sein sollte. Passiert z.B. bei einem Reset durch Versions-Update -->
-		<cue name="Initializer" instantiate="true" checkinterval="1">
-			<conditions>
-				<check_value value="true" />
-			</conditions>
-			<actions>
-				<set_value name="global.$debugchance" exact="0" />
-				<signal_cue cue="WarehouseFleets" check="false" />
-			</actions>
-		</cue>
-
-		<cue name="Config" version="1">
-			<conditions>
-				<check_any>
-					<event_cue_signalled cue="md.Setup.GameStart" />
-					<event_universe_generated/>
-					<event_game_loaded />
-				</check_any>
-			</conditions>
-			<actions>
-				<do_if value="not @$isConfigSet">
-					<!-- user vars -->
-					<set_value name="$accountThreshold" exact="1" />
-					<set_value name="$transferToPlayer" exact="false" />
-					<set_value name="$stationAccountMaxThreshold" exact="1" />
-					<set_value name="$transferToStation" exact="false" />
-					<set_value name="$stationAccountMinThreshold" exact="0" />
-					<set_value name="$isConfigSet" exact="true" />
-				</do_if>
-			</actions>
-		</cue>
-
-		<!-- Main Cue -->
-		<cue name="WarehouseFleets" namespace="this">
-			<conditions>
-				<check_any>
-					<event_cue_signalled cue="md.Setup.Start" />
-					<event_cue_signalled cue="WarehouseFleets" />
-				</check_any>
-				<check_value value="true" />
-			</conditions>
-			<actions>
-				<set_value name="$version" exact="15" />
-				<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Initialize Warehouse Fleets Mod, Version = ' + $version" output="false" append="true" />
-				<set_value name="$deliveries" exact="[]" />
-				<signal_cue cue="ShipInitializer" check="false" comment="check=false, da es den Cue erst nach den actions gibt" />
-			</actions>
-			<cues>
-				<!-- Prüft auf Versions-Updates und resettet ggf. den Main Cue -->
-				<cue name="ModVersionWatcher" instantiate="true" checkinterval="1">
-					<conditions>
-						<check_value value="parent.$version == null or parent.$version lt 15" />
-					</conditions>
-					<actions>
-						<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Resetting WarehouseFleets Mod (outdated version detected: '+parent.$version+')'" output="false" append="true" />
-						<reset_cue cue="WarehouseFleets" />
-					</actions>
-				</cue>
-
-				<!-- Registriert alle bereits existierenden Spieler-Schiffe -->
-				<cue name="ShipInitializer">
-					<conditions>
-						<event_cue_signalled />
-					</conditions>
-					<actions>
-						<find_ship_by_true_owner faction="faction.player" space="player.galaxy" name="$myShips" multiple="true" />
-						<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Found ships: ' + $myShips.count" output="false" append="true" />
-						<do_for_each in="$myShips" name="$ship">
-							<signal_objects object="player.entity" param="'WarehouseFleets'" param2="'RegisterShip'" param3="$ship" />
-						</do_for_each>
-					</actions>
-				</cue>
-
-				<!-- Listener, über den ein Scheduling angefordert werden kann -->
-				<cue name="ScheduleRequestListener" instantiate="true">
-					<conditions>
-						<event_object_signalled object="player.entity" param="'WarehouseFleets'" param2="'RequestScheduling'" />
-					</conditions>
-					<actions>
-						<set_value name="$ship" exact="event.param3" />
-						<set_value name="$deliveries" exact="parent.$deliveries" />
-						<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Schedule request received for ship ' + $ship.idcode" output="false" append="true" />
-						<run_actions ref="WarehouseFleetScheduler">
-							<param name="ship" value="$ship" />
-							<param name="deliveries" value="$deliveries" />
-						</run_actions>
-					</actions>
-				</cue>
-
-				<!-- Schiff-spezifische Cues -->
-				<cue name="ShipHandler" instantiate="true" namespace="this">
-					<conditions>
-						<check_any>
-							<event_player_built_ship />
-							<event_object_signalled object="player.entity" param="'WarehouseFleets'" param2="'RegisterShip'" />
-						</check_any>
-					</conditions>
-					<actions>
-						<set_value name="$ship" exact="if event.name == 'event_player_built_ship' then event.param else event.param3" />
-						<set_value name="$deliveries" exact="parent.$deliveries" />
-						<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Registered ship: ' + $ship.idcode" output="false" append="true" />
-					</actions>
-					<cues>
-						<cue name="ShipSpecificCues">
-							<cues>
-
-								<cue name="ShipDeleteWatcher" checkinterval="5">
-									<conditions>
-										<check_value value="not $ship.exists" />
-									</conditions>
-									<actions>
-										<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Ship ' + $ship.idcode + ' destroyed, cancelling cues'" output="false" append="true" />
-										<cancel_cue cue="ShipSpecificCues" />
-									</actions>
-								</cue>
-
-								<!-- Fordert ein Scheduling an, während der letzte Trade ausgeführt wird -->
-								<cue name="ScheduleFollowUpTripWhenDocking" instantiate="true">
-									<conditions>
-										<check_any>
-											<event_trade_started buyer="$ship" />
-											<event_trade_started seller="$ship" />
-										</check_any>
-										<check_value value="@(if $ship.defaultorder.id == 'Assist' then $ship.defaultorder.$baseorder else $ship.defaultorder).id == 'WarehouseFleet'" />
-										<check_value value="$ship.orders.count == 1" />
-										<check_value value="$ship.orders.{1}.id == 'TradePerform'" />
-										<check_value value="$ship.orders.{1}.$tradedeal.owner.idcode == event.param.owner.idcode" />
-									</conditions>
-									<actions>
-										<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Ship ' + $ship.idcode + ' executing last trade, scheduling follow-up trip'" output="false" append="true" />
-										<run_actions ref="WarehouseFleetScheduler">
-											<param name="ship" value="$ship" />
-											<param name="deliveries" value="$deliveries" />
-										</run_actions>
-									</actions>
-								</cue>
-
-								<!-- Synchronisiert Parameter zwischen verschiedenen Flotten -->
-								<cue name="OrderParamSynchronization" instantiate="true">
-									<conditions>
-										<event_object_order_ready object="$ship" />
-										<check_value value="@event.param.id == 'WarehouseFleet'" />
-									</conditions>
-									<actions>
-										<set_value name="$thisShip" exact="event.object" />
-										<set_value name="$order" exact="event.param" />
-										<sort_list list="$order.$targets" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
-										<sort_list list="$order.$targetsM" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
-										<sort_list list="$order.$targetsL" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
-										<sort_list list="$order.$targetsXL" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
-										<find_ship_by_true_owner space="player.galaxy" faction="faction.player" multiple="true" name="$otherShips" excluded="$thisShip" />
-										<do_for_each in="$otherShips" name="$otherShip">
-											<do_if value="$otherShip.defaultorder.id == 'WarehouseFleet'">
-												<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Syncing params ' + $thisShip.idcode + ' -> ' + $otherShip.idcode" output="false" append="true" />
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'accountThreshold'" value="$order.$accountThreshold" /> -->
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'transferToPlayer'" value="$order.$transferToPlayer" /> -->
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'stationAccountMaxThreshold'" value="$order.$stationAccountMaxThreshold" /> -->
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'transferToStation'" value="$order.$transferToStation" /> -->
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'stationAccountMinThreshold'" value="$order.$stationAccountMinThreshold" /> -->
-											</do_if>
-										</do_for_each>
-									</actions>
-								</cue>
-							</cues>
-						</cue>
-					</cues>
-				</cue>
-
-				<!-- Order-Spezifische Cues -->
-				<cue name="UpdateDeliveryOnOrderCompletion" instantiate="true" namespace="this">
-					<conditions>
-						<event_cue_signalled />
-					</conditions>
-					<actions>
-						<set_value name="$ship" exact="event.param.$ship" />
-						<set_value name="$order" exact="event.param.$order" />
-						<set_value name="$delivery" exact="event.param.$delivery" />
-						<set_value name="$deliveries" exact="parent.$deliveries" />
-					</actions>
-					<cues>
-						<cue name="OrderStateWatcherInstance">
-							<cues>
-								<cue name="OrderFinishWatcher">
-									<conditions>
-										<event_object_order_finished object="$ship" order="$order" />
-									</conditions>
-									<actions>
-										<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Setting finish time for ship ' + $ship.idcode" output="false" append="true" />
-										<set_value name="$delivery.$timeFinished" exact="player.age" />
-										<cancel_cue cue="OrderStateWatcherInstance" />
-									</actions>
-								</cue>
-								<cue name="OrderDeleteWatcher" checkinterval="5">
-									<conditions>
-										<check_value value="not $order.exists" />
-									</conditions>
-									<actions>
-										<remove_from_list name="$deliveries" exact="$delivery" />
-										<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Removed delivery (order cancelled): ' + $delivery" output="false" append="true" />
-										<cancel_cue cue="OrderStateWatcherInstance" />
-									</actions>
-								</cue>
-							</cues>
-						</cue>
-					</cues>
-				</cue>
-
-				<!-- Entfernt regelmäßig alte Deliveries aus der globalen Liste -->
-				<cue name="GarbageCollector" checkinterval="30" instantiate="true">
-					<actions>
-						<set_value name="$deliveries" exact="parent.$deliveries" />
-						<do_for_each in="$deliveries" name="$delivery">
-							<do_if value="$delivery.$timeFinished != null and $delivery.$timeFinished lt (player.age - 900) or $delivery.$timeScheduled lt (player.age - 1800)" comment="Annahme: jeder Flug ist nach spätestens 30min abgeschlossen">
-								<remove_from_list name="$deliveries" exact="$delivery" />
-							</do_if>
-						</do_for_each>
-						<debug_to_file chance="global.$debugchance" name="'garbage-collector'" directory="'WarehouseFleets'" text="$deliveries.count + ' Deliveries:'" output="false" append="false" />
-						<do_for_each in="$deliveries" name="$delivery">
-							<debug_to_file chance="global.$debugchance" name="'garbage-collector'" directory="'WarehouseFleets'" text="$delivery" output="false" append="true" />
-						</do_for_each>
-					</actions>
-				</cue>
-
-			</cues>
-
-		</cue>
-
-		<!-- Library-Funktion die den nächsten Auftrag für ein Schiff bestimmt und als Order erzeugt -->
-		<library name="WarehouseFleetScheduler" purpose="run_actions">
-			<params>
-				<param name="ship" />
-				<param name="deliveries" />
-			</params>
-			<actions>
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'==============================='" output="false" append="false" />
-
-				<!-- Abbrechen, falls das Default Command geändert wurde -->
-				<set_value name="$order" exact="if $ship.defaultorder.id == 'Assist' then $ship.defaultorder.$baseorder else $ship.defaultorder" />
-				<do_if value="$order == null or not $order.exists or $order.id != 'WarehouseFleet'">
-					<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Wrong default order found, cancelling scheduler (' + @$order.id + ')'" output="false" append="true" />
-					<return />
-				</do_if>
-
-				<set_value name="$sourceStation" exact="$order.$sourceStation" />
-
-				<do_if value="md.WarehouseFleets.Config.$transferToPlayer and ($sourceStation.money gt (md.WarehouseFleets.Config.$stationAccountMaxThreshold * 1000000Cr))">
-					<set_value name="$moneyToTransfer" exact="$sourceStation.money - (md.WarehouseFleets.Config.$stationAccountMinThreshold * 1000000Cr)" />
-					<write_to_logbook category="upkeep" object="$sourceStation" title="'Warehouse Account'" money="$moneyToTransfer" text="'Transferring credits from ' + $sourceStation.knownname +' (' + $sourceStation.idcode + ')'" />
-					<transfer_money from="$sourceStation" to="faction.player" amount="$moneyToTransfer" />
-				</do_if>
-
-				<!-- Schiff leer machen, falls noch Ladung vorhanden -->
-				<set_value name="$cargo" exact="$ship.cargo.list" />
-				<do_if value="$cargo.count gt 0">
-					<do_all exact="$cargo.count" counter="$wareInCargo">
-						<set_value name="$ware" exact="$cargo.{$wareInCargo}" />
-						<set_value name="$amount" exact="$ship.cargo.{$ware}.count" />
-						<set_value name="$money" exact="$amount * $ware.averageprice" />
-						<remove_cargo object="$ship" ware="$ware" exact="$amount" />
-						<reward_player money="$money" />
-						<set_value name="$rewardLogText" exact="'rewarded player for ' +$amount + ' ' +$ware + ' at averageprice ' +$ware.averageprice/100.0 + ' due to cargo emptying routine'" />
-						<write_to_logbook category="upkeep" object="$ship" title="'WarehouseFleet: ' + $ship.knownname +' (' + $ship.idcode + ')'" interaction="showonmap" money="$money" text="$rewardLogText" />
-					</do_all>
-				</do_if>
-
-				<!-- Target Stations ermitteln (als Targets können auch Sektoren angegeben werden) -->
-				<create_list name="$targetStations" />
-				<do_if value="$ship.isclass.ship_s" comment="S-Schiffe werden aktuell nur im lokalen Sektor eingesetzt, für weitere Flüge sind sie i.d.R. zu ineffizient">
-					<run_actions ref="AddStations">
-						<param name="stations" value="$targetStations" />
-						<param name="newTargets" value="[$order.$sourceStation.sector]" />
-						<param name="ship" value="$ship" />
-					</run_actions>
-				</do_if>
-				<do_elseif value="not $ship.isclass.ship_s">
-					<run_actions ref="AddStations">
-						<param name="stations" value="$targetStations" />
-						<param name="newTargets" value="$order.$targets" />
-						<param name="ship" value="$ship" />
-					</run_actions>
-					<do_if value="$ship.isclass.ship_m">
-						<run_actions ref="AddStations">
-							<param name="stations" value="$targetStations" />
-							<param name="newTargets" value="$order.$targetsM" />
-							<param name="ship" value="$ship" />
-						</run_actions>
-					</do_if>
-					<do_elseif value="$ship.isclass.ship_l">
-						<run_actions ref="AddStations">
-							<param name="stations" value="$targetStations" />
-							<param name="newTargets" value="$order.$targetsL" />
-							<param name="ship" value="$ship" />
-						</run_actions>
-					</do_elseif>
-					<do_elseif value="$ship.isclass.ship_xl">
-						<run_actions ref="AddStations">
-							<param name="stations" value="$targetStations" />
-							<param name="newTargets" value="$order.$targetsXL" />
-							<param name="ship" value="$ship" />
-						</run_actions>
-					</do_elseif>
-				</do_elseif>
-				<remove_from_list name="$targetStations" exact="$sourceStation" />
-
-				<!-- Warenliste für Push-Trades erstellen -->
-				<find_sell_offer seller="$sourceStation" result="$sellOffers" tradepartner="$ship" multiple="true" usereservations="false" excludeempty="true" />
-				<run_actions ref="GetTradewaresFromOffers" result="$pushWares">
-					<param name="tradeoffers" value="$sellOffers" />
-				</run_actions>
-
-				<!-- Warenliste für Pull-Trades erstellen -->
-				<find_buy_offer buyer="$sourceStation" result="$buyOffers" tradepartner="$ship" multiple="true" usereservations="false" excludeempty="true" />
-				<run_actions ref="GetTradewaresFromOffers" result="$pullWares">
-					<param name="tradeoffers" value="$buyOffers" />
-				</run_actions>
-
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Checking push trades:'" output="false" append="true" />
-				<run_actions ref="FindPossibleTransports" result="$pushTransports">
-					<param name="ship" value="$ship" />
-					<param name="order" value="$order" />
-					<param name="providers" value="[$sourceStation]" />
-					<param name="receivers" value="$targetStations" />
-					<param name="tradewares" value="$pushWares" />
-					<param name="deliveries" value="$deliveries" />
-				</run_actions>
-
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Checking pull trades:'" output="false" append="true" />
-				<run_actions ref="FindPossibleTransports" result="$pullTransports">
-					<param name="ship" value="$ship" />
-					<param name="order" value="$order" />
-					<param name="providers" value="$targetStations" />
-					<param name="receivers" value="[$sourceStation]" />
-					<param name="tradewares" value="$pullWares" />
-					<param name="deliveries" value="$deliveries" />
-				</run_actions>
-
-				<run_actions ref="AssembleTrip" result="$bestPushTrip">
-					<param name="ship" value="$ship" />
-					<param name="order" value="$order" />
-					<param name="possibleTransports" value="$pushTransports" />
-					<param name="provider" value="null" />
-					<param name="receiver" value="null" />
-				</run_actions>
-
-				<run_actions ref="AssembleTrip" result="$bestPullTrip">
-					<param name="ship" value="$ship" />
-					<param name="order" value="$order" />
-					<param name="possibleTransports" value="$pullTransports" />
-					<param name="provider" value="null" />
-					<param name="receiver" value="null" />
-				</run_actions>
-
-				<do_if value="$bestPushTrip == null and $bestPullTrip == null">
-					<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'No trade found that meets minimum cargo usage requirement'" output="false" append="true" />
-					<return />
-				</do_if>
-
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Best Push Trip: ' + $bestPushTrip" output="false" append="true" />
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Best Pull Trip: ' + $bestPullTrip" output="false" append="true" />
-
-				<set_value name="$resultPushTrip" exact="null" />
-				<set_value name="$resultPullTrip" exact="null" />
-
-				<!-- Fall 1: nur Pull Trip gefunden -->
-				<do_if value="$bestPullTrip != null and $bestPushTrip == null">
-					<set_value name="$resultPushTrip" exact="null" />
-					<set_value name="$resultPullTrip" exact="$bestPullTrip" />
-				</do_if>
-
-				<!-- Fall 2: nur Push Trip gefunden -->
-				<do_elseif value="$bestPushTrip != null and $bestPullTrip == null">
-					<set_value name="$resultPushTrip" exact="$bestPushTrip" />
-					<set_value name="$resultPullTrip" exact="null" />
-				</do_elseif>
-
-				<!-- Fall 3: PushTrip schedulen; dazu erstbesten passenden PullTrip auswählen -->
-				<do_elseif value="$bestPushTrip != null and $bestPullTrip != null and $bestPushTrip.$rating ge $bestPullTrip.$rating">
-					<set_value name="$resultPushTrip" exact="$bestPushTrip" />
-					<run_actions ref="AssembleTrip" result="$resultPullTrip">
-						<param name="ship" value="$ship" />
-						<param name="order" value="$order" />
-						<param name="possibleTransports" value="$pullTransports" />
-						<param name="provider" value="$bestPushTrip.$receiver" />
-						<param name="receiver" value="$bestPushTrip.$provider" />
-					</run_actions>
-				</do_elseif>
-
-				<!-- Fall 4: PullTrip schedulen; dazu erstbesten passenden PushTrip auswählen -->
-				<do_elseif value="$bestPushTrip != null and $bestPullTrip != null and $bestPushTrip.$rating lt $bestPullTrip.$rating">
-					<run_actions ref="AssembleTrip" result="$resultPushTrip">
-						<param name="ship" value="$ship" />
-						<param name="order" value="$order" />
-						<param name="possibleTransports" value="$pushTransports" />
-						<param name="provider" value="$bestPullTrip.$receiver" />
-						<param name="receiver" value="$bestPullTrip.$provider" />
-					</run_actions>
-					<set_value name="$resultPullTrip" exact="$bestPullTrip" />
-				</do_elseif>
-
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Push Trip: ' + $resultPushTrip" output="false" append="true" />
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Pull Trip: ' + $resultPullTrip" output="false" append="true" />
-
-				<do_all exact="2" counter="$idx">
-					<set_value name="$trip" exact="if $idx == 1 then $resultPushTrip else $resultPullTrip" />
-					<do_if value="$trip != null">
-
-						<!-- Delivery-Objekte erzeugen (providerOrder und receiverOrder werden später gefüllt) -->
-						<create_list name="$newDeliveries" />
-						<do_all exact="$trip.$wares.count" counter="$idxWare">
-							<set_value name="$ware" exact="$trip.$wares.{$idxWare}" />
-							<set_value name="$delivery" exact="table[
-								$shipID = $ship.idcode,
-								$timeScheduled = player.age,
-								$timeFinished = null,
-								$wareID = $ware.$receiverOffer.ware.id,
-								$amount = $ware.$amount,
-								$providerID = $trip.$provider.idcode,
-								$receiverID = $trip.$receiver.idcode,
-								$providerOrder = null,
-								$receiverOrder = null,
-							]" />
-							<append_to_list name="$newDeliveries" exact="$delivery" />
-							<append_to_list name="$deliveries" exact="$delivery" />
-						</do_all>
-
-						<!-- Einkauf-Trade-Orders erzeugen -->
-						<do_all exact="$trip.$wares.count" counter="$idxWare">
-							<set_value name="$ware" exact="$trip.$wares.{$idxWare}" />
-							<set_value name="$delivery" exact="$newDeliveries.{$idxWare}" />
-							<create_trade_order name="$providerOrder" object="$ship" tradeoffer="$ware.$providerOffer" amount="$ware.$amount" />
-							<set_value name="$delivery.$providerOrder" exact="$providerOrder" />
-						</do_all>
-
-						<!-- Verkauf-Trade-Orders erzeugen -->
-						<do_all exact="$trip.$wares.count" counter="$idxWare">
-							<set_value name="$ware" exact="$trip.$wares.{$idxWare}" />
-							<set_value name="$delivery" exact="$newDeliveries.{$idxWare}" />
-							<create_trade_order name="$receiverOrder" object="$ship" tradeoffer="$ware.$receiverOffer" amount="$ware.$amount" />
-							<set_value name="$delivery.$receiverOrder" exact="$receiverOrder" />
-						</do_all>
-
-						<!-- Loggen und OrderCompletion-Listener registrieren -->
-						<do_all exact="$trip.$wares.count" counter="$idxWare">
-							<set_value name="$ware" exact="$trip.$wares.{$idxWare}" />
-							<set_value name="$delivery" exact="$newDeliveries.{$idxWare}" />
-							<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Added delivery: ' + $delivery" output="false" append="true" />
-							<signal_cue_instantly cue="UpdateDeliveryOnOrderCompletion" param="table[$ship = $ship, $delivery = $delivery, $order = $delivery.$receiverOrder]" />
-						</do_all>
-
-					</do_if>
-				</do_all>
-
-				<!-- Wenn der Roundtrip nicht an der Home-Station endet => Rückflug-Order erzeugen -->
-				<do_if value="$resultPullTrip == null">
-					<create_order object="$ship" id="'ReturnToWarehouse'">
-						<param name="destination" value="$sourceStation" />
-					</create_order>
-				</do_if>
-
-			</actions>
-		</library>
-
-		<!-- Library-Funktion, die mögliche Tradeoffers für gegebene Stationen ermittelt -->
-		<library name="FindPossibleTransports" purpose="run_actions">
-			<params>
-				<param name="ship" />
-				<param name="order" />
-				<param name="providers" comment="Stationen, von denen Waren bereitgestellt werden" />
-				<param name="receivers" comment="Stationen/Build-Storages, an die geliefert wird" />
-				<param name="tradewares" comment="Waren, die mit anderen Fraktionen gehandelt werden" />
-				<param name="deliveries" />
-			</params>
-			<actions>
-
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'	Tradewares: ' + $tradewares" append="true" />
-
-				<!-- Angebote des Provider-Warehouses ermitteln -->
-				<get_ware_definition result="$allwares" flags="tradeware" />
-				<create_list name="$providerOffers" />
-				<do_all exact="$providers.count" counter="$idxProvider">
-					<set_value name="$provider" exact="$providers.{$idxProvider}" />
-					<do_if value="$provider.class == class.buildstorage">
-						<continue comment="BuildStorages nie als Provider verwenden, die haben sowieso keine SellOffers" />
-					</do_if>
-					<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'	Provider: ' + $provider.knownname + ' ('+$provider.idcode+')'" append="true" />
-					<set_value name="$wares" exact="if $provider.trueowner == faction.player then $allwares else $tradewares" />
-					<do_if value="$wares.count gt 0">
-						<find_sell_offer seller="$provider" result="$offers" multiple="true" usereservations="true" wares="$wares" tradepartner="$ship">
-							<match_seller>
-								<match_use_blacklist object="$ship" group="blacklistgroup.civilian" type="blacklisttype.sectortravel" />
-								<match_use_blacklist object="$ship" group="blacklistgroup.civilian" type="blacklisttype.objectactivity" />
-							</match_seller>
-						</find_sell_offer>
-						<do_all exact="$offers.count" counter="$idxOffer">
-							<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'		' + $offers.{$idxOffer}.ware + ' ('+$offers.{$idxOffer}.amount+'/'+$offers.{$idxOffer}.desiredamount+')'" append="true" />
-						</do_all>
-						<append_list_elements name="$providerOffers" other="$offers" />
-					</do_if>
-				</do_all>
-
-				<!-- Nachfrage an Abnehmer-Warehouses ermitteln (inkl. Build Storages) -->
-				<create_list name="$receiverOffers" />
-				<do_all exact="$receivers.count" counter="$idxReceiver">
-					<set_value name="$receiver" exact="$receivers.{$idxReceiver}" />
-					<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'	Receiver: ' + $receiver.knownname + ' ('+$receiver.idcode+')'" append="true" />
-					<set_value name="$wares" exact="if $receiver.trueowner == faction.player then $allwares else $tradewares" />
-					<do_if value="$wares.count gt 0">
-						<find_buy_offer buyer="$receiver" result="$offers" multiple="true" usereservations="true" wares="$wares" tradepartner="$ship" excludeempty="false" comment="excludeempty, da Warehouses ohne Budget sonst nichts ankaufen können">
-							<match_buyer>
-								<match_use_blacklist object="$ship" group="blacklistgroup.civilian" type="blacklisttype.sectortravel" />
-								<match_use_blacklist object="$ship" group="blacklistgroup.civilian" type="blacklisttype.objectactivity" />
-							</match_buyer>
-						</find_buy_offer>
-						<do_all exact="$offers.count" counter="$idxOffer">
-							<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'		' + $offers.{$idxOffer}.ware + ' ('+$offers.{$idxOffer}.amount+'/'+$offers.{$idxOffer}.desiredamount+')'" append="true" />
-						</do_all>
-						<append_list_elements name="$receiverOffers" other="$offers" />
-					</do_if>
-				</do_all>
-
-				<!-- Berechne Reservierungen -->
-				<set_value name="$reservations" exact="table[]" />
-				<do_for_each in="$deliveries" name="$delivery">
-					<set_value name="$providerKey" exact="'$' + $delivery.$providerID + '/' + $delivery.$wareID" />
-					<set_value name="$receiverKey" exact="'$' + $delivery.$receiverID + '/' + $delivery.$wareID" />
-					<do_if value="$delivery.$providerOrder.exists">
-						<set_value operation="subtract" name="$reservations.{$providerKey}" exact="$delivery.$amount" />
-					</do_if>
-					<do_if value="$delivery.$receiverOrder.exists">
-						<set_value operation="add" name="$reservations.{$receiverKey}" exact="$delivery.$amount" />
-					</do_if>
-				</do_for_each>
-
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'	reservations: ' + $reservations" append="true" />
-
-				<create_list name="$possibleTransports" />
-				<do_for_each in="$providerOffers" name="$providerOffer">
-					<do_for_each in="$receiverOffers" name="$receiverOffer">
-						<do_if value="$providerOffer.ware.id == $receiverOffer.ware.id">
-							<set_value name="$provider" exact="$providerOffer.owner" />
-							<set_value name="$receiver" exact="$receiverOffer.owner" />
-
-							<do_if value="$order.$supplyTargets.indexof.{$provider} > 0">
-								<continue comment="Falls die Provider-Station ein Supply-Target ist, soll sie nur Waren empfangen, aber nie selber welche anbieten" />
-							</do_if>
-
-							<do_if value="$receiver.class == class.buildstorage and not $receiver.base.exists">
-								<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'ZOMBIE: '+$receiver.idcode" />
-								<continue />
-							</do_if>
-
-							<set_value name="$transportType" exact="
-								if $order.$supplyTargets.indexof.{$receiver} > 0 then 'supply'
-								else if $receiver.trueowner == faction.player and $receiver.class == class.buildstorage then 'supply'
-								else if $provider.trueowner == faction.player and $receiver.trueowner == faction.player then 'distribution'
-								else 'trade'
-							" />
-
-							<!-- Kapazität des Schiffs ermitteln -->
-							<set_value name="$shipCapacity" exact="
-								if $providerOffer.ware.waretransport == waretransport.solid	then $ship.cargo.capacity.solid
-								else if $providerOffer.ware.waretransport == waretransport.liquid then $ship.cargo.capacity.liquid
-								else if $providerOffer.ware.waretransport == waretransport.condensate then $ship.cargo.capacity.condensate
-								else $ship.cargo.capacity.container" />
-							<set_value name="$maxWareAmount" exact="$shipCapacity / $providerOffer.ware.volume" />
-							<do_if value="$maxWareAmount le 0">
-								<continue comment="Schiff kann diese Ware nicht transportieren"/>
-							</do_if>
-
-							<!-- Unprofitable Trades kann man hier schon erkennen und abbrechen -->
-							<set_value name="$profitRatio" exact="($receiverOffer.unitprice)f / ($providerOffer.unitprice)f - 1f" comment="Wertebereich ca. (-1, +1)" />
-							<do_if value="$transportType == 'trade' and $profitRatio le 0.05">
-								<continue />
-							</do_if>
-
-							<!-- Bei Trade Transports prüfen, ob das eigene Buy/Sell Offer Restriktionen hat und diese berücksichtigen -->
-							<do_if value="$transportType == 'trade'">
-								<set_value name="$sourceOffer" exact="if $provider.idcode == $order.$sourceStation.idcode then $providerOffer else $receiverOffer" />
-								<set_value name="$targetStation" exact="if $provider.idcode == $order.$sourceStation.idcode then $receiverOffer.owner else $providerOffer.owner" />
-								<set_value name="$allowed" exact="if not $sourceOffer.restriction.inverted 
-									then $sourceOffer.restriction.factions.indexof.{$targetStation.owner} gt 0
-									else $sourceOffer.restriction.factions.indexof.{$targetStation.owner} == 0
-								" comment="not inverted = Whitelist" />
-								<do_if value="not $allowed">
-									<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Trade ' + $sourceOffer.ware + ' ' + (if $provider.idcode == $order.$sourceStation.idcode then 'to' else 'from') + ' ' + $targetStation.owner + ' not allowed'" />
-									<continue comment="Trade durch Restriktionen verboten" />
-								</do_if>
-							</do_if>
-
-							<!-- Reservations ermitteln -->
-							<set_value name="$providerKey" exact="'$' + $provider.idcode + '/' + $providerOffer.ware.id" />
-							<set_value name="$receiverKey" exact="'$' + $receiver.idcode + '/' + $receiverOffer.ware.id" />
-							<set_value name="$providerReservations" exact="@$reservations.{$providerKey} + 0" />
-							<set_value name="$receiverReservations" exact="@$reservations.{$receiverKey} + 0" />
-
-							<!-- Berechne Backpressure: Anzahl der Waren, die kürzlich in entgegengesetzter Richtung transportiert werden, gewichtet mit der Dauer seit des Transports -->
-							<set_value name="$backpressure" exact="0" />
-							<do_if value="$transportType == 'distribution'">
-								<do_for_each in="$deliveries" name="$delivery">
-									<do_if value="$delivery.$wareID == $providerOffer.ware.id and $delivery.$timeFinished != null and $delivery.$providerID == $receiver.idcode and $delivery.$receiverID == $provider.idcode">
-										<set_value name="$backpressure" exact="$backpressure + ($delivery.$amount * (1.0 - [player.age - $delivery.$timeFinished, 1200.0].min / 1200.0))" />
-									</do_if>
-								</do_for_each>
-							</do_if>
-
-							<set_value name="$providerCargo" exact="$provider.cargo.{$providerOffer.ware}.count" />
-							<set_value name="$receiverCargo" exact="$receiver.cargo.{$receiverOffer.ware}.count" />
-							<set_value name="$providerCapacity" exact="$provider.cargo.{$providerOffer.ware}.target" />
-							<set_value name="$receiverCapacity" exact="$receiver.cargo.{$receiverOffer.ware}.target" />
-							<set_value name="$providerCargoRatio" exact="if $providerCapacity gt 0 
-								then [[100.0 * ($providerCargo + $providerReservations - $backpressure) / $providerCapacity, 100.0].min, 0.0].max
-								else 100.0" />
-							<set_value name="$receiverCargoRatio" exact="if $receiverCapacity gt 0
-								then [[100.0 * ($receiverCargo	+ $receiverReservations) / $receiverCapacity, 100.0].min, 0.0].max
-								else 100.0" />
-
-							<!-- Bei Distribution Transportes die maximale sinnvolle Menge berechnen (es soll maximal soviel transportiert werden, dass die Mengen danach ausgeglichen sind) -->
-							<do_if value="$transportType == 'distribution'">
-								<set_value name="$equalizingAmount" exact="(
-									($providerCargo + $providerReservations) * (($receiverCapacity)LF / ($providerCapacity + $receiverCapacity))
-								- ($receiverCargo + $receiverReservations) * (($providerCapacity)LF / ($providerCapacity + $receiverCapacity))
-								)i" />
-								<set_value name="$amount" exact="[[$maxWareAmount, $equalizingAmount].min, 0].max" />
-							</do_if>
-							<do_elseif value="$transportType == 'supply'">
-								<set_value name="$amount" exact="[[$maxWareAmount, $providerOffer.amount, $receiverOffer.desiredamount].min, 0].max" />
-							</do_elseif>
-							<do_elseif value="$provider.trueowner != faction.player">
-								<!-- Ankauf von Waren - hier berechnen wir die Einkaufsmenge selbst, denn die BuyOffers können aufgrund fehlender Stationsbudgets wesentlich zu niedrig sein -->
-								<set_value name="$buyAmount" exact="[(player.money - md.WarehouseFleets.Config.$accountThreshold * 1000000Cr)L / ($receiverOffer.unitprice)i, $receiverOffer.desiredamount].min" />
-								<set_value name="$amount" exact="[[$maxWareAmount, $providerOffer.amount, $buyAmount].min, 0].max" />
-							</do_elseif>
-							<do_else>
-								<set_value name="$amount" exact="[[$maxWareAmount, $providerOffer.amount, $receiverOffer.amount].min, 0].max" />
-							</do_else>
-
-							<set_value name="$cargoUsage" exact="($amount)f / $maxWareAmount" />
-							<do_if value="$transportType == 'distribution'">
-								<set_value name="$importance" exact="($providerCargoRatio - $receiverCargoRatio) * (1.0 - $receiverCargoRatio/200.0) * ($order.$prioDistribution/10f)" />
-							</do_if>
-							<do_if value="$transportType == 'supply'">
-								<set_value name="$importance" exact="0.5 * (1.0 - $receiverCargoRatio/200.0) * $order.$prioSupply^2 * (if ($receiver.class == class.buildstorage) then 2 else 1)" />
-							</do_if>
-							<do_if value="$transportType == 'trade'">
-								<set_value name="$storageLevelRating" exact="[[if $provider.idcode == $order.$sourceStation.idcode then $providerCargoRatio else (100f - $receiverCargoRatio), 100.0].min, 0.0].max" />
-								<set_value name="$gd" exact="$provider.gatedistance.{$receiver}.{blacklistgroup.civilian}.{$ship}" />
-								<set_value name="$importance" exact="0.5 * ([100f * $profitRatio, 0].max + $storageLevelRating/100.0) * ($order.$tradeGatePenalty/100f) ^ $gd * ($order.$prioTrade/10f)" />
-							</do_if>
-
-							<set_value name="$completesBuildRequest" exact="$transportType == 'supply' and $receiver.class == class.buildstorage and $receiverOffer.desiredamount == $amount" />
-							<set_value name="$rating" exact="$importance * if ($completesBuildRequest) then ($shipCapacity) else ($amount * $providerOffer.ware.volume)" />
-
-							<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'	'
-									+ '[' + $transportType + ' ' + $provider.idcode + ' -> ' + $receiver.idcode + ' ' + $providerOffer.ware + '] '
-									+ 'importance = ' + '%.3s'.[$importance]
-									+ ', rating = ' + '%.3s'.[$rating]
-									+ ', %.1s'.[$providerCargoRatio] + '% -> ' + '%.1s'.[$receiverCargoRatio] + '%'
-									+ ', providerCargo = ' + $providerCargo
-									+ ', providerReservations = ' + $providerReservations
-									+ ', receiverCargo = ' + $receiverCargo
-									+ ', receiverReservations = ' + $receiverReservations
-									+ ', profitRatio = ' + '%.1s'.[100.0 * $profitRatio] + '%'
-									+ ', backpressure = ' + $backpressure
-									+ ', sellAmount = ' + $providerOffer.amount
-									+ ', buyAmount = ' + $receiverOffer.amount
-									+ ', equalizingAmount = ' + @$equalizingAmount
-									+ ', maxWareAmount = ' + $maxWareAmount
-									+ ', amount = ' + $amount
-									+ ', gd = ' + @$gd
-									+ ', cargoUsage = ' + '%.1s'.[100.0 * $cargoUsage] + '%'
-								" output="false" append="true" />
-
-							<do_if value="$amount * $providerOffer.ware.volume lt 0.1 * $shipCapacity">
-								<continue comment="Ware ignorieren, falls wir nicht mindestens 10% des Schiffes damit beladen können" />
-							</do_if>
-
-							<do_if value="$importance le 0">
-								<continue comment="Ware ignorieren, falls der Transport nicht sinnvoll ist" />
-							</do_if>
-
-							<append_to_list name="$possibleTransports" exact="table[
-								$transportType = $transportType,
-								$importance = $importance,
-								$rating = $rating,
-								$ware = $providerOffer.ware,
-								$amount = $amount,
-								$cargoUsage = $cargoUsage,
-								$profitRatio = $profitRatio,
-								$backpressure = $backpressure,
-								$provider = $provider,
-								$receiver = $receiver,
-								$providerID = $receiver.idcode,
-								$receiverID = $receiver.idcode,
-								$providerOffer = $providerOffer, 
-								$receiverOffer = $receiverOffer,
-								$completesBuildRequest = $completesBuildRequest,
-							]" />
-						</do_if>
-					</do_for_each>
-				</do_for_each>
-
-				<sort_list list="$possibleTransports" sortbyvalue="loop.element.$rating" sortdescending="true" />
-				<debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'	' + $possibleTransports.count + ' possible transports found'" />
-				<return value="$possibleTransports" />
-
-			</actions>
-		</library>
-
-		<library name="AssembleTrip" purpose="run_actions" namespace="this" comment="Fügt mehrere Transports zu einem Trip zusammen">
-			<params>
-				<param name="ship" />
-				<param name="order" />
-				<param name="possibleTransports" comment="Die Einzel-Warentransporte, absteigend nach Rating sortiert" />
-				<param name="provider" comment="kann null sein" />
-				<param name="receiver" comment="kann null sein" />
-			</params>
-			<actions>
-
-				<create_list name="$checkedRelations" />
-				<do_for_each in="$possibleTransports" name="$referenceTransport">
-
-					<!-- Auf relevante Relationen filtern -->
-					<do_if value="$provider != null and $referenceTransport.$provider != $provider">
-						<continue />
-					</do_if>
-					<do_if value="$receiver != null and $referenceTransport.$receiver != $receiver">
-						<continue />
-					</do_if>
-
-					<!-- Jede Relation nur einmal prüfen -->
-					<set_value name="$relationID" exact="$referenceTransport.$provider.idcode + ' -> ' + $referenceTransport.$receiver.idcode" />
-					<do_if value="$checkedRelations.indexof.{$relationID} gt 0">
-						<continue comment="Relation wurde bereits geprüft" />
-					</do_if>
-					<append_to_list name="$checkedRelations" exact="$relationID" />
-
-					<!-- Alle Transports zusammensuchen, die zur Relation gehören (sortiert nach absteigendem Rating ist bereits) -->
-					<set_value name="$usedCargoSpace" exact="0" />
-					<set_value name="$rating" exact="0" />
-					<set_value name="$transportWares" exact="[]" />
-					<set_value name="$completesBuildRequest" exact="false" />
-					<do_for_each in="$possibleTransports" name="$transport">
-						<do_if value="$transport.$provider == $referenceTransport.$provider and $transport.$receiver == $referenceTransport.$receiver">
-							<set_value name="$maxTransportAmount" exact="[$transport.$amount, ($ship.cargo.capacity.all - $usedCargoSpace) / $transport.$ware.volume].min" />
-							<append_to_list name="$transportWares" exact="table[
-								$ware = $transport.$ware,
-								$amount = $maxTransportAmount,
-								$providerOffer = $transport.$providerOffer, 
-								$receiverOffer = $transport.$receiverOffer,
-							]" />
-							<set_value name="$rating" operation="add" exact="$transport.$rating" />
-							<set_value name="$usedCargoSpace" operation="add" exact="$maxTransportAmount * $transport.$ware.volume" />
-							<set_value name="$completesBuildRequest" exact="$completesBuildRequest or $transport.$completesBuildRequest" />
-							<do_if value="$transportWares.count ge 3">
-								<break comment="Nicht mehr als 3 verschiedene Waren transportieren" />
-							</do_if>
-							<set_value name="$cargoUsage" exact="100f * $usedCargoSpace / $ship.cargo.capacity.all" />
-							<do_if value="$cargoUsage gt 95f">
-								<break comment="Abbrechen, wenn das Schiff voll beladen ist" />
-							</do_if>
-						</do_if>
-					</do_for_each>
-
-					<!-- Falls die minCargoUsage erreicht wurde => als Ergebnis zurckgeben. Ansonsten wird die nächste Relation geprüft -->
-					<set_value name="$cargoUsage" exact="100f * $usedCargoSpace / $ship.cargo.capacity.all" />
-					<do_if value="$cargoUsage ge $order.$minCargoUsage or $completesBuildRequest">
-						<return value="table[
-							$provider = $referenceTransport.$provider,
-							$receiver = $referenceTransport.$receiver,
-							$providerID = $referenceTransport.$receiver.idcode,
-							$receiverID = $referenceTransport.$receiver.idcode,
-							$wares = $transportWares,
-							$cargoUsage = $cargoUsage,
-							$rating = $rating,
-						]" />
-					</do_if>
-
-				</do_for_each>
-
-				<return value="null" />
-			</actions>
-		</library>
-
-		<library name="AddStations" purpose="run_actions" namespace="this">
-			<params>
-				<param name="stations" />
-				<param name="newTargets" comment="Targets vom Typ station oder sector" />
-				<param name="ship" comment="Schiff, für das das Scheduling stattfindet; wird hier übergeben, damit man prüfen kann, ob ein Andocken überhaupt möglich ist" />
-			</params>
-			<actions>
-
-				<do_for_each in="$newTargets" name="$target">
-
-					<do_if value="$target.class == class.sector">
-
-						<!-- Stationen suchen und einfügen -->
-						<find_station multiple="true" space="$target" name="$stationsInSector" active="true">
-							<match_relation_to object="$ship" relation="dock" />
-							<match_content checkoperational="true">
-								<match_dock size="$ship.docksize" trading="true" />
-							</match_content>
-							<match_use_blacklist group="blacklistgroup.civilian" type="blacklisttype.sectortravel" object="$ship" />
-							<match_use_blacklist group="blacklistgroup.civilian" type="blacklisttype.objectactivity" object="$ship" />
-						</find_station>
-						<do_for_each in="$stationsInSector" name="$station">
-							<do_if value="$stations.indexof.{$station} == 0">
-								<append_to_list name="$stations" exact="$station" />
-							</do_if>
-						</do_for_each>
-
-						<!-- Buildstorages suchen und einfügen -->
-						<find_object class="class.buildstorage" multiple="true" space="$target" name="$buildstoragesInSector">
-							<match_relation_to object="$ship" relation="dock" />
-							<match_use_blacklist group="blacklistgroup.civilian" type="blacklisttype.sectortravel" object="$ship" />
-							<match_use_blacklist group="blacklistgroup.civilian" type="blacklisttype.objectactivity" object="$ship" />
-						</find_object>
-						<do_for_each in="$buildstoragesInSector" name="$buildstorage">
-							<do_if value="$stations.indexof.{$buildstorage} == 0">
-								<append_to_list name="$stations" exact="$buildstorage" />
-							</do_if>
-						</do_for_each>
-
-					</do_if>
-
-					<!-- Station einfügen -->
-					<do_if value="$target.class == class.station and $stations.indexof.{$target} == 0">
-						<append_to_list name="$stations" exact="$target" />
-					</do_if>
-
-					<!-- Zugehörige Build-Storage einfügen, falls vorhanden -->
-					<do_if value="$target.buildstorage? and $stations.indexof.{$target.buildstorage} == 0">
-						<append_to_list name="$stations" exact="$target.buildstorage" />
-					</do_if>
-
-				</do_for_each>
-			</actions>
-		</library>
-
-		<library name="GetTradewaresFromOffers" purpose="run_actions" namespace="this">
-			<params>
-				<param name="tradeoffers" />
-			</params>
-			<actions>
-				<create_list name="$result" />
-				<do_for_each in="$tradeoffers" name="$offer">
-					<do_if value="not $offer.restriction.inverted and $offer.restriction.factions.count == 1 and $offer.restriction.factions.{1} == faction.player">
-						<continue comment="Ware wird nicht mit anderen Fraktionen gehandelt" />
-					</do_if>
-					<do_if value="$result.indexof.{$offer.ware} == 0">
-						<append_to_list name="$result" exact="$offer.ware" />
-					</do_if>
-				</do_for_each>
-				<return value="$result" />
-			</actions>
-		</library>
-	</cues>
+  <cues>
+
+    <!-- Startet den Main Cue, falls dieser nicht aktiv sein sollte. Passiert z.B. bei einem Reset durch Versions-Update -->
+    <cue name="Initializer" instantiate="true" checkinterval="1">
+      <conditions>
+        <check_value value="true" />
+      </conditions>
+      <actions>
+        <set_value name="global.$debugchance" exact="0" />
+        <signal_cue cue="WarehouseFleets" check="false" />
+      </actions>
+    </cue>
+
+    <!-- Main Cue -->
+    <cue name="WarehouseFleets" namespace="this">
+      <conditions>
+        <check_any>
+          <event_cue_signalled cue="md.Setup.Start" />
+          <event_cue_signalled cue="WarehouseFleets" />
+        </check_any>
+        <check_value value="true" />
+      </conditions>
+      <actions>
+        <set_value name="$version" exact="15" />
+        <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Initialize Warehouse Fleets Mod, Version = ' + $version" output="false" append="true" />
+        <set_value name="$deliveries" exact="[]" />
+        <signal_cue cue="ShipInitializer" check="false" comment="check=false, da es den Cue erst nach den actions gibt" />
+      </actions>
+      <cues>
+
+        <!-- Prüft auf Versions-Updates und resettet ggf. den Main Cue -->
+        <cue name="ModVersionWatcher" instantiate="true" checkinterval="1">
+          <conditions>
+            <check_value value="parent.$version == null or parent.$version lt 15" />
+          </conditions>
+          <actions>
+            <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Resetting WarehouseFleets Mod (outdated version detected: '+parent.$version+')'" output="false" append="true" />
+            <reset_cue cue="WarehouseFleets" />
+          </actions>
+        </cue>
+
+        <!-- Registriert alle bereits existierenden Spieler-Schiffe -->
+        <cue name="ShipInitializer">
+          <conditions>
+            <event_cue_signalled />
+          </conditions>
+          <actions>
+            <find_ship_by_true_owner faction="faction.player" space="player.galaxy" name="$myShips" multiple="true" />
+            <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Found ships: ' + $myShips.count" output="false" append="true" />
+            <do_for_each in="$myShips" name="$ship">
+              <signal_objects object="player.entity" param="'WarehouseFleets'" param2="'RegisterShip'" param3="$ship" />
+            </do_for_each>
+          </actions>
+        </cue>
+
+        <!-- Listener, über den ein Scheduling angefordert werden kann -->
+        <cue name="ScheduleRequestListener" instantiate="true">
+          <conditions>
+            <event_object_signalled object="player.entity" param="'WarehouseFleets'" param2="'RequestScheduling'" />
+          </conditions>
+          <actions>
+            <set_value name="$ship" exact="event.param3" />
+            <set_value name="$deliveries" exact="parent.$deliveries" />
+            <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Schedule request received for ship ' + $ship.idcode" output="false" append="true" />
+            <run_actions ref="WarehouseFleetScheduler">
+              <param name="ship" value="$ship" />
+              <param name="deliveries" value="$deliveries" />
+            </run_actions>
+          </actions>
+        </cue>
+
+        <!-- Schiff-spezifische Cues -->
+        <cue name="ShipHandler" instantiate="true" namespace="this">
+          <conditions>
+            <check_any>
+              <event_player_built_ship />
+              <event_object_signalled object="player.entity" param="'WarehouseFleets'" param2="'RegisterShip'" />
+            </check_any>
+          </conditions>
+          <actions>
+            <set_value name="$ship" exact="if event.name == 'event_player_built_ship' then event.param else event.param3" />
+            <set_value name="$deliveries" exact="parent.$deliveries" />
+            <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Registered ship: ' + $ship.idcode" output="false" append="true" />
+          </actions>
+          <cues>
+            <cue name="ShipSpecificCues">
+              <cues>
+
+                <cue name="ShipDeleteWatcher" checkinterval="5">
+                  <conditions>
+                    <check_value value="not $ship.exists" />
+                  </conditions>
+                  <actions>
+                    <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Ship ' + $ship.idcode + ' destroyed, cancelling cues'" output="false" append="true" />
+                    <cancel_cue cue="ShipSpecificCues" />
+                  </actions>
+                </cue>
+
+                <!-- Fordert ein Scheduling an, während der letzte Trade ausgeführt wird -->
+                <cue name="ScheduleFollowUpTripWhenDocking" instantiate="true">
+                  <conditions>
+                    <check_any>
+                      <event_trade_started buyer="$ship" />
+                      <event_trade_started seller="$ship" />
+                    </check_any>
+                    <check_value value="@(if $ship.defaultorder.id == 'Assist' then $ship.defaultorder.$baseorder else $ship.defaultorder).id == 'WarehouseFleet'" />
+                    <check_value value="$ship.orders.count == 1" />
+                    <check_value value="$ship.orders.{1}.id == 'TradePerform'" />
+                    <check_value value="$ship.orders.{1}.$tradedeal.owner.idcode == event.param.owner.idcode" />
+                  </conditions>
+                  <actions>
+                    <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Ship ' + $ship.idcode + ' executing last trade, scheduling follow-up trip'" output="false" append="true" />
+                    <run_actions ref="WarehouseFleetScheduler">
+                      <param name="ship" value="$ship" />
+                      <param name="deliveries" value="$deliveries" />
+                    </run_actions>
+                  </actions>
+                </cue>
+
+                <!-- Synchronisiert Parameter zwischen verschiedenen Flotten -->
+                <cue name="OrderParamSynchronization" instantiate="true">
+                  <conditions>
+                    <event_object_order_ready object="$ship" />
+                    <check_value value="@event.param.id == 'WarehouseFleet'" />
+                  </conditions>
+                  <actions>
+                    <set_value name="$thisShip" exact="event.object" />
+                    <set_value name="$order" exact="event.param" />
+                    <sort_list list="$order.$targets" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
+                    <sort_list list="$order.$targetsM" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
+                    <sort_list list="$order.$targetsL" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
+                    <sort_list list="$order.$targetsXL" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
+                    <find_ship_by_true_owner space="player.galaxy" faction="faction.player" multiple="true" name="$otherShips" excluded="$thisShip" />
+                    <do_for_each in="$otherShips" name="$otherShip">
+                      <do_if value="$otherShip.defaultorder.id == 'WarehouseFleet'">
+                        <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Syncing params ' + $thisShip.idcode + ' -> ' + $otherShip.idcode" output="false" append="true" />
+                        <edit_order_param order="$otherShip.defaultorder" param="'accountThreshold'" value="$order.$accountThreshold" />
+                        <edit_order_param order="$otherShip.defaultorder" param="'transferToPlayer'" value="$order.$transferToPlayer" />
+                        <edit_order_param order="$otherShip.defaultorder" param="'stationAccountMaxThreshold'" value="$order.$stationAccountMaxThreshold" />
+                        <edit_order_param order="$otherShip.defaultorder" param="'transferToStation'" value="$order.$transferToStation" />
+                        <edit_order_param order="$otherShip.defaultorder" param="'stationAccountMinThreshold'" value="$order.$stationAccountMinThreshold" />
+                      </do_if>
+                    </do_for_each>
+                  </actions>
+                </cue>
+              </cues>
+            </cue>
+          </cues>
+        </cue>
+
+        <!-- Order-Spezifische Cues -->
+        <cue name="UpdateDeliveryOnOrderCompletion" instantiate="true" namespace="this">
+          <conditions>
+            <event_cue_signalled />
+          </conditions>
+          <actions>
+            <set_value name="$ship" exact="event.param.$ship" />
+            <set_value name="$order" exact="event.param.$order" />
+            <set_value name="$delivery" exact="event.param.$delivery" />
+            <set_value name="$deliveries" exact="parent.$deliveries" />
+          </actions>
+          <cues>
+            <cue name="OrderStateWatcherInstance">
+              <cues>
+                <cue name="OrderFinishWatcher">
+                  <conditions>
+                    <event_object_order_finished object="$ship" order="$order" />
+                  </conditions>
+                  <actions>
+                    <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Setting finish time for ship ' + $ship.idcode" output="false" append="true" />
+                    <set_value name="$delivery.$timeFinished" exact="player.age" />
+                    <cancel_cue cue="OrderStateWatcherInstance" />
+                  </actions>
+                </cue>
+                <cue name="OrderDeleteWatcher" checkinterval="5">
+                  <conditions>
+                    <check_value value="not $order.exists" />
+                  </conditions>
+                  <actions>
+                    <remove_from_list name="$deliveries" exact="$delivery" />
+                    <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Removed delivery (order cancelled): ' + $delivery" output="false" append="true" />
+                    <cancel_cue cue="OrderStateWatcherInstance" />
+                  </actions>
+                </cue>
+              </cues>
+            </cue>
+          </cues>
+        </cue>
+
+        <!-- Entfernt regelmäßig alte Deliveries aus der globalen Liste -->
+        <cue name="GarbageCollector" checkinterval="30" instantiate="true">
+          <actions>
+            <set_value name="$deliveries" exact="parent.$deliveries" />
+            <do_for_each in="$deliveries" name="$delivery">
+              <do_if value="$delivery.$timeFinished != null and $delivery.$timeFinished lt (player.age - 900) or $delivery.$timeScheduled lt (player.age - 1800)" comment="Annahme: jeder Flug ist nach spätestens 30min abgeschlossen">
+                <remove_from_list name="$deliveries" exact="$delivery" />
+              </do_if>
+            </do_for_each>
+            <debug_to_file chance="global.$debugchance" name="'garbage-collector'" directory="'WarehouseFleets'" text="$deliveries.count + ' Deliveries:'" output="false" append="false" />
+            <do_for_each in="$deliveries" name="$delivery">
+              <debug_to_file chance="global.$debugchance" name="'garbage-collector'" directory="'WarehouseFleets'" text="$delivery" output="false" append="true" />
+            </do_for_each>
+          </actions>
+        </cue>
+
+      </cues>
+
+    </cue>
+
+    <!-- Library-Funktion die den nächsten Auftrag für ein Schiff bestimmt und als Order erzeugt -->
+    <library name="WarehouseFleetScheduler" purpose="run_actions">
+      <params>
+        <param name="ship" />
+        <param name="deliveries" />
+      </params>
+      <actions>
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'==============================='" output="false" append="false" />
+
+        <!-- Abbrechen, falls das Default Command geändert wurde -->
+        <set_value name="$order" exact="if $ship.defaultorder.id == 'Assist' then $ship.defaultorder.$baseorder else $ship.defaultorder" />
+        <do_if value="$order == null or not $order.exists or $order.id != 'WarehouseFleet'">
+          <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Wrong default order found, cancelling scheduler (' + @$order.id + ')'" output="false" append="true" />
+          <return />
+        </do_if>
+
+        <set_value name="$sourceStation" exact="$order.$sourceStation" />
+
+        <do_if value="$order.$transferToPlayer and ($sourceStation.money gt ($order.$stationAccountMaxThreshold * 1000000Cr))">
+          <!-- FIXME: Bisschen Geld übrig lassen, damit die Station Waren ankaufen kann? -->
+          <set_value name="$moneyToTransfer" exact="$sourceStation.money - ($order.$stationAccountMinThreshold * 1000000Cr)" />
+          <write_to_logbook category="upkeep" object="$sourceStation" title="'Warehouse Account'" money="$moneyToTransfer" text="'Transferring credits from ' + $sourceStation.knownname +' (' + $sourceStation.idcode + ')'" />
+          <transfer_money from="$sourceStation" to="faction.player" amount="$moneyToTransfer" />
+        </do_if>
+
+        <!-- Schiff leer machen, falls noch Ladung vorhanden -->
+        <set_value name="$cargo" exact="$ship.cargo.list" />
+        <do_if value="$cargo.count gt 0">
+          <do_all exact="$cargo.count" counter="$wareInCargo">
+            <set_value name="$ware" exact="$cargo.{$wareInCargo}" />
+            <set_value name="$amount" exact="$ship.cargo.{$ware}.count" />
+            <set_value name="$money" exact="$amount * $ware.averageprice" />
+            <remove_cargo object="$ship" ware="$ware" exact="$amount" />
+            <reward_player money="$money" />
+            <set_value name="$rewardLogText" exact="'rewarded player for ' +$amount + ' ' +$ware + ' at averageprice ' +$ware.averageprice/100.0 + ' due to cargo emptying routine'" />
+            <write_to_logbook category="upkeep" object="$ship" title="'WarehouseFleet: ' + $ship.knownname +' (' + $ship.idcode + ')'" interaction="showonmap" money="$money" text="$rewardLogText" />
+          </do_all>
+        </do_if>
+
+        <!-- Target Stations ermitteln (als Targets können auch Sektoren angegeben werden) -->
+        <create_list name="$targetStations" />
+        <do_if value="$ship.isclass.ship_s" comment="S-Schiffe werden aktuell nur im lokalen Sektor eingesetzt, für weitere Flüge sind sie i.d.R. zu ineffizient">
+          <run_actions ref="AddStations">
+            <param name="stations" value="$targetStations" />
+            <param name="newTargets" value="[$order.$sourceStation.sector]" />
+            <param name="ship" value="$ship" />
+          </run_actions>
+        </do_if>
+        <do_if value="not $ship.isclass.ship_s">
+          <run_actions ref="AddStations">
+            <param name="stations" value="$targetStations" />
+            <param name="newTargets" value="$order.$targets" />
+            <param name="ship" value="$ship" />
+          </run_actions>
+          <do_if value="$ship.isclass.ship_m">
+            <run_actions ref="AddStations">
+              <param name="stations" value="$targetStations" />
+              <param name="newTargets" value="$order.$targetsM" />
+              <param name="ship" value="$ship" />
+            </run_actions>
+          </do_if>
+          <do_elseif value="$ship.isclass.ship_l">
+            <run_actions ref="AddStations">
+              <param name="stations" value="$targetStations" />
+              <param name="newTargets" value="$order.$targetsL" />
+              <param name="ship" value="$ship" />
+            </run_actions>
+          </do_elseif>
+          <do_elseif value="$ship.isclass.ship_xl">
+            <run_actions ref="AddStations">
+              <param name="stations" value="$targetStations" />
+              <param name="newTargets" value="$order.$targetsXL" />
+              <param name="ship" value="$ship" />
+            </run_actions>
+          </do_elseif>
+        </do_if>
+        <remove_from_list name="$targetStations" exact="$sourceStation" />
+
+        <!-- Warenliste für Push-Trades erstellen -->
+        <find_sell_offer seller="$sourceStation" result="$sellOffers" tradepartner="$ship" multiple="true" usereservations="false" excludeempty="true" />
+        <run_actions ref="GetTradewaresFromOffers" result="$pushWares">
+          <param name="tradeoffers" value="$sellOffers" />
+        </run_actions>
+
+        <!-- Warenliste für Pull-Trades erstellen -->
+        <find_buy_offer buyer="$sourceStation" result="$buyOffers" tradepartner="$ship" multiple="true" usereservations="false" excludeempty="true" />
+        <run_actions ref="GetTradewaresFromOffers" result="$pullWares">
+          <param name="tradeoffers" value="$buyOffers" />
+        </run_actions>
+
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Checking push trades:'" output="false" append="true" />
+        <run_actions ref="FindPossibleTransports" result="$pushTransports">
+          <param name="ship" value="$ship" />
+          <param name="order" value="$order" />
+          <param name="providers" value="[$sourceStation]" />
+          <param name="receivers" value="$targetStations" />
+          <param name="tradewares" value="$pushWares" />
+          <param name="deliveries" value="$deliveries" />
+        </run_actions>
+
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Checking pull trades:'" output="false" append="true" />
+        <run_actions ref="FindPossibleTransports" result="$pullTransports">
+          <param name="ship" value="$ship" />
+          <param name="order" value="$order" />
+          <param name="providers" value="$targetStations" />
+          <param name="receivers" value="[$sourceStation]" />
+          <param name="tradewares" value="$pullWares" />
+          <param name="deliveries" value="$deliveries" />
+        </run_actions>
+
+        <run_actions ref="AssembleTrip" result="$bestPushTrip">
+          <param name="ship" value="$ship" />
+          <param name="order" value="$order" />
+          <param name="possibleTransports" value="$pushTransports" />
+          <param name="provider" value="null" />
+          <param name="receiver" value="null" />
+        </run_actions>
+
+        <run_actions ref="AssembleTrip" result="$bestPullTrip">
+          <param name="ship" value="$ship" />
+          <param name="order" value="$order" />
+          <param name="possibleTransports" value="$pullTransports" />
+          <param name="provider" value="null" />
+          <param name="receiver" value="null" />
+        </run_actions>
+
+        <do_if value="$bestPushTrip == null and $bestPullTrip == null">
+          <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'No trade found that meets minimum cargo usage requirement'" output="false" append="true" />
+          <return />
+        </do_if>
+
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Best Push Trip: ' + $bestPushTrip" output="false" append="true" />
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Best Pull Trip: ' + $bestPullTrip" output="false" append="true" />
+
+        <set_value name="$resultPushTrip" exact="null" />
+        <set_value name="$resultPullTrip" exact="null" />
+
+        <!-- Fall 1: nur Pull Trip gefunden -->
+        <do_if value="$bestPullTrip != null and $bestPushTrip == null">
+          <set_value name="$resultPushTrip" exact="null" />
+          <set_value name="$resultPullTrip" exact="$bestPullTrip" />
+        </do_if>
+
+        <!-- Fall 2: nur Push Trip gefunden -->
+        <do_elseif value="$bestPushTrip != null and $bestPullTrip == null">
+          <set_value name="$resultPushTrip" exact="$bestPushTrip" />
+          <set_value name="$resultPullTrip" exact="null" />
+        </do_elseif>
+
+        <!-- Fall 3: PushTrip schedulen; dazu erstbesten passenden PullTrip auswählen -->
+        <do_elseif value="$bestPushTrip != null and $bestPullTrip != null and $bestPushTrip.$rating ge $bestPullTrip.$rating">
+          <set_value name="$resultPushTrip" exact="$bestPushTrip" />
+          <run_actions ref="AssembleTrip" result="$resultPullTrip">
+            <param name="ship" value="$ship" />
+            <param name="order" value="$order" />
+            <param name="possibleTransports" value="$pullTransports" />
+            <param name="provider" value="$bestPushTrip.$receiver" />
+            <param name="receiver" value="$bestPushTrip.$provider" />
+          </run_actions>
+        </do_elseif>
+
+        <!-- Fall 4: PullTrip schedulen; dazu erstbesten passenden PushTrip auswählen -->
+        <do_elseif value="$bestPushTrip != null and $bestPullTrip != null and $bestPushTrip.$rating lt $bestPullTrip.$rating">
+          <run_actions ref="AssembleTrip" result="$resultPushTrip">
+            <param name="ship" value="$ship" />
+            <param name="order" value="$order" />
+            <param name="possibleTransports" value="$pushTransports" />
+            <param name="provider" value="$bestPullTrip.$receiver" />
+            <param name="receiver" value="$bestPullTrip.$provider" />
+          </run_actions>
+          <set_value name="$resultPullTrip" exact="$bestPullTrip" />
+        </do_elseif>
+
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Push Trip: ' + $resultPushTrip" output="false" append="true" />
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Pull Trip: ' + $resultPullTrip" output="false" append="true" />
+
+        <do_all exact="2" counter="$idx">
+          <set_value name="$trip" exact="if $idx == 1 then $resultPushTrip else $resultPullTrip" />
+          <do_if value="$trip != null">
+
+            <!-- Delivery-Objekte erzeugen (providerOrder und receiverOrder werden später gefüllt) -->
+            <create_list name="$newDeliveries" />
+            <do_all exact="$trip.$wares.count" counter="$idxWare">
+              <set_value name="$ware" exact="$trip.$wares.{$idxWare}" />
+              <set_value name="$delivery" exact="table[
+                $shipID = $ship.idcode,
+                $timeScheduled = player.age,
+                $timeFinished = null,
+                $wareID = $ware.$receiverOffer.ware.id,
+                $amount = $ware.$amount,
+                $providerID = $trip.$provider.idcode,
+                $receiverID = $trip.$receiver.idcode,
+                $providerOrder = null,
+                $receiverOrder = null,
+              ]" />
+              <append_to_list name="$newDeliveries" exact="$delivery" />
+              <append_to_list name="$deliveries" exact="$delivery" />
+            </do_all>
+
+            <!-- Einkauf-Trade-Orders erzeugen -->
+            <do_all exact="$trip.$wares.count" counter="$idxWare">
+              <set_value name="$ware" exact="$trip.$wares.{$idxWare}" />
+              <set_value name="$delivery" exact="$newDeliveries.{$idxWare}" />
+              <create_trade_order name="$providerOrder" object="$ship" tradeoffer="$ware.$providerOffer" amount="$ware.$amount" />
+              <set_value name="$delivery.$providerOrder" exact="$providerOrder" />
+            </do_all>
+
+            <!-- Verkauf-Trade-Orders erzeugen -->
+            <do_all exact="$trip.$wares.count" counter="$idxWare">
+              <set_value name="$ware" exact="$trip.$wares.{$idxWare}" />
+              <set_value name="$delivery" exact="$newDeliveries.{$idxWare}" />
+              <create_trade_order name="$receiverOrder" object="$ship" tradeoffer="$ware.$receiverOffer" amount="$ware.$amount" />
+              <set_value name="$delivery.$receiverOrder" exact="$receiverOrder" />
+            </do_all>
+
+            <!-- Loggen und OrderCompletion-Listener registrieren -->
+            <do_all exact="$trip.$wares.count" counter="$idxWare">
+              <set_value name="$ware" exact="$trip.$wares.{$idxWare}" />
+              <set_value name="$delivery" exact="$newDeliveries.{$idxWare}" />
+              <debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Added delivery: ' + $delivery" output="false" append="true" />
+              <signal_cue_instantly cue="UpdateDeliveryOnOrderCompletion" param="table[$ship = $ship, $delivery = $delivery, $order = $delivery.$receiverOrder]" />
+            </do_all>
+
+          </do_if>
+        </do_all>
+
+        <!-- Wenn der Roundtrip nicht an der Home-Station endet => Rückflug-Order erzeugen -->
+        <do_if value="$resultPullTrip == null">
+          <create_order object="$ship" id="'ReturnToWarehouse'">
+            <param name="destination" value="$sourceStation" />
+          </create_order>
+        </do_if>
+
+      </actions>
+    </library>
+
+    <!-- Library-Funktion, die mögliche Tradeoffers für gegebene Stationen ermittelt -->
+    <library name="FindPossibleTransports" purpose="run_actions">
+      <params>
+        <param name="ship" />
+        <param name="order" />
+        <param name="providers" comment="Stationen, von denen Waren bereitgestellt werden" />
+        <param name="receivers" comment="Stationen/Build-Storages, an die geliefert wird" />
+        <param name="tradewares" comment="Waren, die mit anderen Fraktionen gehandelt werden" />
+        <param name="deliveries" />
+      </params>
+      <actions>
+
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'  Tradewares: ' + $tradewares" append="true" />
+
+        <!-- Angebote des Provider-Warehouses ermitteln -->
+        <get_ware_definition result="$allwares" flags="tradeware" />
+        <create_list name="$providerOffers" />
+        <do_all exact="$providers.count" counter="$idxProvider">
+          <set_value name="$provider" exact="$providers.{$idxProvider}" />
+          <do_if value="$provider.class == class.buildstorage">
+            <continue comment="BuildStorages nie als Provider verwenden, die haben sowieso keine SellOffers" />
+          </do_if>
+          <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'  Provider: ' + $provider.knownname + ' ('+$provider.idcode+')'" append="true" />
+          <set_value name="$wares" exact="if $provider.trueowner == faction.player then $allwares else $tradewares" />
+          <do_if value="$wares.count gt 0">
+            <find_sell_offer seller="$provider" result="$offers" multiple="true" usereservations="true" wares="$wares" tradepartner="$ship">
+              <match_seller>
+                <match_use_blacklist object="$ship" group="blacklistgroup.civilian" type="blacklisttype.sectortravel" />
+                <match_use_blacklist object="$ship" group="blacklistgroup.civilian" type="blacklisttype.objectactivity" />
+              </match_seller>
+            </find_sell_offer>
+            <do_all exact="$offers.count" counter="$idxOffer">
+              <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'    ' + $offers.{$idxOffer}.ware + ' ('+$offers.{$idxOffer}.amount+'/'+$offers.{$idxOffer}.desiredamount+')'" append="true" />
+            </do_all>
+            <append_list_elements name="$providerOffers" other="$offers" />
+          </do_if>
+        </do_all>
+
+        <!-- Nachfrage an Abnehmer-Warehouses ermitteln (inkl. Build Storages) -->
+        <create_list name="$receiverOffers" />
+        <do_all exact="$receivers.count" counter="$idxReceiver">
+          <set_value name="$receiver" exact="$receivers.{$idxReceiver}" />
+          <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'  Receiver: ' + $receiver.knownname + ' ('+$receiver.idcode+')'" append="true" />
+          <set_value name="$wares" exact="if $receiver.trueowner == faction.player then $allwares else $tradewares" />
+          <do_if value="$wares.count gt 0">
+            <find_buy_offer buyer="$receiver" result="$offers" multiple="true" usereservations="true" wares="$wares" tradepartner="$ship" excludeempty="false" comment="excludeempty, da Warehouses ohne Budget sonst nichts ankaufen können">
+              <match_buyer>
+                <match_use_blacklist object="$ship" group="blacklistgroup.civilian" type="blacklisttype.sectortravel" />
+                <match_use_blacklist object="$ship" group="blacklistgroup.civilian" type="blacklisttype.objectactivity" />
+              </match_buyer>
+            </find_buy_offer>
+            <do_all exact="$offers.count" counter="$idxOffer">
+              <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'    ' + $offers.{$idxOffer}.ware + ' ('+$offers.{$idxOffer}.amount+'/'+$offers.{$idxOffer}.desiredamount+')'" append="true" />
+            </do_all>
+            <append_list_elements name="$receiverOffers" other="$offers" />
+          </do_if>
+        </do_all>
+
+        <!-- Berechne Reservierungen -->
+        <set_value name="$reservations" exact="table[]" />
+        <do_for_each in="$deliveries" name="$delivery">
+          <set_value name="$providerKey" exact="'$' + $delivery.$providerID + '/' + $delivery.$wareID" />
+          <set_value name="$receiverKey" exact="'$' + $delivery.$receiverID + '/' + $delivery.$wareID" />
+          <do_if value="$delivery.$providerOrder.exists">
+            <set_value operation="subtract" name="$reservations.{$providerKey}" exact="$delivery.$amount" />
+          </do_if>
+          <do_if value="$delivery.$receiverOrder.exists">
+            <set_value operation="add" name="$reservations.{$receiverKey}" exact="$delivery.$amount" />
+          </do_if>
+        </do_for_each>
+
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'  reservations: ' + $reservations" append="true" />
+
+        <create_list name="$possibleTransports" />
+        <do_for_each in="$providerOffers" name="$providerOffer">
+          <do_for_each in="$receiverOffers" name="$receiverOffer">
+            <do_if value="$providerOffer.ware.id == $receiverOffer.ware.id">
+              <set_value name="$provider" exact="$providerOffer.owner" />
+              <set_value name="$receiver" exact="$receiverOffer.owner" />
+
+              <do_if value="$order.$supplyTargets.indexof.{$provider} > 0">
+                <continue comment="Falls die Provider-Station ein Supply-Target ist, soll sie nur Waren empfangen, aber nie selber welche anbieten" />
+              </do_if>
+
+              <do_if value="$receiver.class == class.buildstorage and not $receiver.base.exists">
+                <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'ZOMBIE: '+$receiver.idcode" />
+                <continue />
+              </do_if>
+
+              <set_value name="$transportType" exact="
+                if $order.$supplyTargets.indexof.{$receiver} > 0 then 'supply'
+                else if $receiver.trueowner == faction.player and $receiver.class == class.buildstorage then 'supply'
+                else if $provider.trueowner == faction.player and $receiver.trueowner == faction.player then 'distribution'
+                else 'trade'
+              " />
+
+              <!-- Kapazität des Schiffs ermitteln -->
+              <set_value name="$shipCapacity" exact="
+                if $providerOffer.ware.waretransport == waretransport.solid  then $ship.cargo.capacity.solid
+                else if $providerOffer.ware.waretransport == waretransport.liquid then $ship.cargo.capacity.liquid
+                else if $providerOffer.ware.waretransport == waretransport.condensate then $ship.cargo.capacity.condensate
+                else $ship.cargo.capacity.container" />
+              <set_value name="$maxWareAmount" exact="$shipCapacity / $providerOffer.ware.volume" />
+              <do_if value="$maxWareAmount le 0">
+                <continue comment="Schiff kann diese Ware nicht transportieren"/>
+              </do_if>
+
+              <!-- Unprofitable Trades kann man hier schon erkennen und abbrechen -->
+              <set_value name="$profitRatio" exact="($receiverOffer.unitprice)f / ($providerOffer.unitprice)f - 1f" comment="Wertebereich ca. (-1, +1)" />
+              <do_if value="$transportType == 'trade' and $profitRatio le 0.05">
+                <continue />
+              </do_if>
+
+              <!-- Bei Trade Transports prüfen, ob das eigene Buy/Sell Offer Restriktionen hat und diese berücksichtigen -->
+              <do_if value="$transportType == 'trade'">
+                <set_value name="$sourceOffer" exact="if $provider.idcode == $order.$sourceStation.idcode then $providerOffer else $receiverOffer" />
+                <set_value name="$targetStation" exact="if $provider.idcode == $order.$sourceStation.idcode then $receiverOffer.owner else $providerOffer.owner" />
+                <set_value name="$allowed" exact="if not $sourceOffer.restriction.inverted 
+                  then $sourceOffer.restriction.factions.indexof.{$targetStation.owner} gt 0
+                  else $sourceOffer.restriction.factions.indexof.{$targetStation.owner} == 0
+                " comment="not inverted = Whitelist" />
+                <do_if value="not $allowed">
+                  <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'Trade ' + $sourceOffer.ware + ' ' + (if $provider.idcode == $order.$sourceStation.idcode then 'to' else 'from') + ' ' + $targetStation.owner + ' not allowed'" />
+                  <continue comment="Trade durch Restriktionen verboten" />
+                </do_if>
+              </do_if>
+
+              <!-- Reservations ermitteln -->
+              <set_value name="$providerKey" exact="'$' + $provider.idcode + '/' + $providerOffer.ware.id" />
+              <set_value name="$receiverKey" exact="'$' + $receiver.idcode + '/' + $receiverOffer.ware.id" />
+              <set_value name="$providerReservations" exact="@$reservations.{$providerKey} + 0" />
+              <set_value name="$receiverReservations" exact="@$reservations.{$receiverKey} + 0" />
+
+              <!-- Berechne Backpressure: Anzahl der Waren, die kürzlich in entgegengesetzter Richtung transportiert werden, gewichtet mit der Dauer seit des Transports -->
+              <set_value name="$backpressure" exact="0" />
+              <do_if value="$transportType == 'distribution'">
+                <do_for_each in="$deliveries" name="$delivery">
+                  <do_if value="$delivery.$wareID == $providerOffer.ware.id and $delivery.$timeFinished != null and $delivery.$providerID == $receiver.idcode and $delivery.$receiverID == $provider.idcode">
+                    <set_value name="$backpressure" exact="$backpressure + ($delivery.$amount * (1.0 - [player.age - $delivery.$timeFinished, 1200.0].min / 1200.0))" />
+                  </do_if>
+                </do_for_each>
+              </do_if>
+
+              <set_value name="$providerCargo" exact="$provider.cargo.{$providerOffer.ware}.count" />
+              <set_value name="$receiverCargo" exact="$receiver.cargo.{$receiverOffer.ware}.count" />
+              <set_value name="$providerCapacity" exact="$provider.cargo.{$providerOffer.ware}.target" />
+              <set_value name="$receiverCapacity" exact="$receiver.cargo.{$receiverOffer.ware}.target" />
+              <set_value name="$providerCargoRatio" exact="if $providerCapacity gt 0 
+                then [[100.0 * ($providerCargo + $providerReservations - $backpressure) / $providerCapacity, 100.0].min, 0.0].max
+                else 100.0" />
+              <set_value name="$receiverCargoRatio" exact="if $receiverCapacity gt 0
+                then [[100.0 * ($receiverCargo  + $receiverReservations) / $receiverCapacity, 100.0].min, 0.0].max
+                else 100.0" />
+
+              <!-- Bei Distribution Transportes die maximale sinnvolle Menge berechnen (es soll maximal soviel transportiert werden, dass die Mengen danach ausgeglichen sind) -->
+              <do_if value="$transportType == 'distribution'">
+                <set_value name="$equalizingAmount" exact="(
+                  ($providerCargo + $providerReservations) * (($receiverCapacity)LF / ($providerCapacity + $receiverCapacity))
+                - ($receiverCargo + $receiverReservations) * (($providerCapacity)LF / ($providerCapacity + $receiverCapacity))
+                )i" />
+                <set_value name="$amount" exact="[[$maxWareAmount, $equalizingAmount].min, 0].max" />
+              </do_if>
+              <do_elseif value="$transportType == 'supply'">
+                <set_value name="$amount" exact="[[$maxWareAmount, $providerOffer.amount, $receiverOffer.desiredamount].min, 0].max" />
+              </do_elseif>
+              <do_elseif value="$provider.trueowner != faction.player">
+                <!-- Ankauf von Waren - hier berechnen wir die Einkaufsmenge selbst, denn die BuyOffers können aufgrund fehlender Stationsbudgets wesentlich zu niedrig sein -->
+                <set_value name="$buyAmount" exact="[(player.money - $order.$accountThreshold * 1000000Cr)L / ($receiverOffer.unitprice)i, $receiverOffer.desiredamount].min" />
+                <set_value name="$amount" exact="[[$maxWareAmount, $providerOffer.amount, $buyAmount].min, 0].max" />
+              </do_elseif>
+              <do_else>
+                <set_value name="$amount" exact="[[$maxWareAmount, $providerOffer.amount, $receiverOffer.amount].min, 0].max" />
+              </do_else>
+
+              <set_value name="$cargoUsage" exact="($amount)f / $maxWareAmount" />
+              <do_if value="$transportType == 'distribution'">
+                <set_value name="$importance" exact="($providerCargoRatio - $receiverCargoRatio) * (1.0 - $receiverCargoRatio/200.0) * ($order.$prioDistribution/10f)" />
+              </do_if>
+              <do_if value="$transportType == 'supply'">
+                <set_value name="$importance" exact="0.5 * (1.0 - $receiverCargoRatio/200.0) * $order.$prioSupply^2 * (if ($receiver.class == class.buildstorage) then 2 else 1)" />
+              </do_if>
+              <do_if value="$transportType == 'trade'">
+                <set_value name="$storageLevelRating" exact="[[if $provider.idcode == $order.$sourceStation.idcode then $providerCargoRatio else (100f - $receiverCargoRatio), 100.0].min, 0.0].max" />
+                <set_value name="$gd" exact="$provider.gatedistance.{$receiver}.{blacklistgroup.civilian}.{$ship}" />
+                <set_value name="$importance" exact="0.5 * ([100f * $profitRatio, 0].max + $storageLevelRating/100.0) * ($order.$tradeGatePenalty/100f) ^ $gd * ($order.$prioTrade/10f)" />
+              </do_if>
+
+              <set_value name="$completesBuildRequest" exact="$transportType == 'supply' and $receiver.class == class.buildstorage and $receiverOffer.desiredamount == $amount" />
+              <set_value name="$rating" exact="$importance * if ($completesBuildRequest) then ($shipCapacity) else ($amount * $providerOffer.ware.volume)" />
+
+              <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'  '
+                  + '[' + $transportType + ' ' + $provider.idcode + ' -> ' + $receiver.idcode + ' ' + $providerOffer.ware + '] '
+                  + 'importance = ' + '%.3s'.[$importance]
+                  + ', rating = ' + '%.3s'.[$rating]
+                  + ', %.1s'.[$providerCargoRatio] + '% -> ' + '%.1s'.[$receiverCargoRatio] + '%'
+                  + ', providerCargo = ' + $providerCargo
+                  + ', providerReservations = ' + $providerReservations
+                  + ', receiverCargo = ' + $receiverCargo
+                  + ', receiverReservations = ' + $receiverReservations
+                  + ', profitRatio = ' + '%.1s'.[100.0 * $profitRatio] + '%'
+                  + ', backpressure = ' + $backpressure
+                  + ', sellAmount = ' + $providerOffer.amount
+                  + ', buyAmount = ' + $receiverOffer.amount
+                  + ', equalizingAmount = ' + @$equalizingAmount
+                  + ', maxWareAmount = ' + $maxWareAmount
+                  + ', amount = ' + $amount
+                  + ', gd = ' + @$gd
+                  + ', cargoUsage = ' + '%.1s'.[100.0 * $cargoUsage] + '%'
+                " output="false" append="true" />
+
+              <do_if value="$amount * $providerOffer.ware.volume lt 0.1 * $shipCapacity">
+                <continue comment="Ware ignorieren, falls wir nicht mindestens 10% des Schiffes damit beladen können" />
+              </do_if>
+
+              <do_if value="$importance le 0">
+                <continue comment="Ware ignorieren, falls der Transport nicht sinnvoll ist" />
+              </do_if>
+
+              <append_to_list name="$possibleTransports" exact="table[
+                $transportType = $transportType,
+                $importance = $importance,
+                $rating = $rating,
+                $ware = $providerOffer.ware,
+                $amount = $amount,
+                $cargoUsage = $cargoUsage,
+                $profitRatio = $profitRatio,
+                $backpressure = $backpressure,
+                $provider = $provider,
+                $receiver = $receiver,
+                $providerID = $receiver.idcode,
+                $receiverID = $receiver.idcode,
+                $providerOffer = $providerOffer, 
+                $receiverOffer = $receiverOffer,
+                $completesBuildRequest = $completesBuildRequest,
+              ]" />
+            </do_if>
+          </do_for_each>
+        </do_for_each>
+
+        <sort_list list="$possibleTransports" sortbyvalue="loop.element.$rating" sortdescending="true" />
+        <debug_to_file chance="global.$debugchance" name="$ship.idcode" directory="'WarehouseFleets'" text="'  ' + $possibleTransports.count + ' possible transports found'" />
+        <return value="$possibleTransports" />
+
+      </actions>
+    </library>
+
+    <library name="AssembleTrip" purpose="run_actions" namespace="this" comment="Fügt mehrere Transports zu einem Trip zusammen">
+      <params>
+        <param name="ship" />
+        <param name="order" />
+        <param name="possibleTransports" comment="Die Einzel-Warentransporte, absteigend nach Rating sortiert" />
+        <param name="provider" comment="kann null sein" />
+        <param name="receiver" comment="kann null sein" />
+      </params>
+      <actions>
+
+        <create_list name="$checkedRelations" />
+        <do_for_each in="$possibleTransports" name="$referenceTransport">
+
+          <!-- Auf relevante Relationen filtern -->
+          <do_if value="$provider != null and $referenceTransport.$provider != $provider">
+            <continue />
+          </do_if>
+          <do_if value="$receiver != null and $referenceTransport.$receiver != $receiver">
+            <continue />
+          </do_if>
+
+          <!-- Jede Relation nur einmal prüfen -->
+          <set_value name="$relationID" exact="$referenceTransport.$provider.idcode + ' -> ' + $referenceTransport.$receiver.idcode" />
+          <do_if value="$checkedRelations.indexof.{$relationID} gt 0">
+            <continue comment="Relation wurde bereits geprüft" />
+          </do_if>
+          <append_to_list name="$checkedRelations" exact="$relationID" />
+
+          <!-- Alle Transports zusammensuchen, die zur Relation gehören (sortiert nach absteigendem Rating ist bereits) -->
+          <set_value name="$usedCargoSpace" exact="0" />
+          <set_value name="$rating" exact="0" />
+          <set_value name="$transportWares" exact="[]" />
+          <set_value name="$completesBuildRequest" exact="false" />
+          <do_for_each in="$possibleTransports" name="$transport">
+            <do_if value="$transport.$provider == $referenceTransport.$provider and $transport.$receiver == $referenceTransport.$receiver">
+              <set_value name="$maxTransportAmount" exact="[$transport.$amount, ($ship.cargo.capacity.all - $usedCargoSpace) / $transport.$ware.volume].min" />
+              <append_to_list name="$transportWares" exact="table[
+                $ware = $transport.$ware,
+                $amount = $maxTransportAmount,
+                $providerOffer = $transport.$providerOffer, 
+                $receiverOffer = $transport.$receiverOffer,
+              ]" />
+              <set_value name="$rating" operation="add" exact="$transport.$rating" />
+              <set_value name="$usedCargoSpace" operation="add" exact="$maxTransportAmount * $transport.$ware.volume" />
+              <set_value name="$completesBuildRequest" exact="$completesBuildRequest or $transport.$completesBuildRequest" />
+              <do_if value="$transportWares.count ge 3">
+                <break comment="Nicht mehr als 3 verschiedene Waren transportieren" />
+              </do_if>
+              <set_value name="$cargoUsage" exact="100f * $usedCargoSpace / $ship.cargo.capacity.all" />
+              <do_if value="$cargoUsage gt 95f">
+                <break comment="Abbrechen, wenn das Schiff voll beladen ist" />
+              </do_if>
+            </do_if>
+          </do_for_each>
+
+          <!-- Falls die minCargoUsage erreicht wurde => als Ergebnis zurckgeben. Ansonsten wird die nächste Relation geprüft -->
+          <set_value name="$cargoUsage" exact="100f * $usedCargoSpace / $ship.cargo.capacity.all" />
+          <do_if value="$cargoUsage ge $order.$minCargoUsage or $completesBuildRequest">
+            <return value="table[
+              $provider = $referenceTransport.$provider,
+              $receiver = $referenceTransport.$receiver,
+              $providerID = $referenceTransport.$receiver.idcode,
+              $receiverID = $referenceTransport.$receiver.idcode,
+              $wares = $transportWares,
+              $cargoUsage = $cargoUsage,
+              $rating = $rating,
+            ]" />
+          </do_if>
+
+        </do_for_each>
+
+        <return value="null" />
+      </actions>
+    </library>
+
+    <library name="AddStations" purpose="run_actions" namespace="this">
+      <params>
+        <param name="stations" />
+        <param name="newTargets" comment="Targets vom Typ station oder sector" />
+        <param name="ship" comment="Schiff, für das das Scheduling stattfindet; wird hier übergeben, damit man prüfen kann, ob ein Andocken überhaupt möglich ist" />
+      </params>
+      <actions>
+
+        <do_for_each in="$newTargets" name="$target">
+
+          <do_if value="$target.class == class.sector">
+
+            <!-- Stationen suchen und einfügen -->
+            <find_station multiple="true" space="$target" name="$stationsInSector" active="true">
+              <match_relation_to object="$ship" relation="dock" />
+              <match_content checkoperational="true">
+                <match_dock size="$ship.docksize" trading="true" />
+              </match_content>
+              <match_use_blacklist group="blacklistgroup.civilian" type="blacklisttype.sectortravel" object="$ship" />
+              <match_use_blacklist group="blacklistgroup.civilian" type="blacklisttype.objectactivity" object="$ship" />
+            </find_station>
+            <do_for_each in="$stationsInSector" name="$station">
+              <do_if value="$stations.indexof.{$station} == 0">
+                <append_to_list name="$stations" exact="$station" />
+              </do_if>
+            </do_for_each>
+
+            <!-- Buildstorages suchen und einfügen -->
+            <find_object class="class.buildstorage" multiple="true" space="$target" name="$buildstoragesInSector">
+              <match_relation_to object="$ship" relation="dock" />
+              <match_use_blacklist group="blacklistgroup.civilian" type="blacklisttype.sectortravel" object="$ship" />
+              <match_use_blacklist group="blacklistgroup.civilian" type="blacklisttype.objectactivity" object="$ship" />
+            </find_object>
+            <do_for_each in="$buildstoragesInSector" name="$buildstorage">
+              <do_if value="$stations.indexof.{$buildstorage} == 0">
+                <append_to_list name="$stations" exact="$buildstorage" />
+              </do_if>
+            </do_for_each>
+
+          </do_if>
+
+          <!-- Station einfügen -->
+          <do_if value="$target.class == class.station and $stations.indexof.{$target} == 0">
+            <append_to_list name="$stations" exact="$target" />
+          </do_if>
+
+          <!-- Zugehörige Build-Storage einfügen, falls vorhanden -->
+          <do_if value="$target.buildstorage? and $stations.indexof.{$target.buildstorage} == 0">
+            <append_to_list name="$stations" exact="$target.buildstorage" />
+          </do_if>
+
+        </do_for_each>
+      </actions>
+    </library>
+
+    <library name="GetTradewaresFromOffers" purpose="run_actions" namespace="this">
+      <params>
+        <param name="tradeoffers" />
+      </params>
+      <actions>
+        <create_list name="$result" />
+        <do_for_each in="$tradeoffers" name="$offer">
+          <do_if value="not $offer.restriction.inverted and $offer.restriction.factions.count == 1 and $offer.restriction.factions.{1} == faction.player">
+            <continue comment="Ware wird nicht mit anderen Fraktionen gehandelt" />
+          </do_if>
+          <do_if value="$result.indexof.{$offer.ware} == 0">
+            <append_to_list name="$result" exact="$offer.ware" />
+          </do_if>
+        </do_for_each>
+        <return value="$result" />
+      </actions>
+    </library>
+  </cues>
 </mdscript>
