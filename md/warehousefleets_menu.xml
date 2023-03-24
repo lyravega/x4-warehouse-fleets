@@ -1,19 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<mdscript name="WarehouseFleetsMenu" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="md.xsd">
+<mdscript name="WarehouseFleetsMenu" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="E:/_modding/X4/_extract/_base/libraries/md.xsd">
 	<cues>
 		<cue name="StartSMO" instantiate="true">
 			<conditions>
 				<event_cue_signalled cue="md.Simple_Menu_Options.Reloaded"/>
 			</conditions>
 			<actions>
-				<!-- <do_if value="not md.WarehouseFleets.Config.@$isConfigSet">
-					<set_value name="md.WarehouseFleets.Config.$accountThreshold" exact="1" />
-					<set_value name="md.WarehouseFleets.Config.$transferToPlayer" exact="false" />
-					<set_value name="md.WarehouseFleets.Config.$stationAccountMaxThreshold" exact="1" />
-					<set_value name="md.WarehouseFleets.Config.$transferToStation" exact="false" />
-					<set_value name="md.WarehouseFleets.Config.$stationAccountMinThreshold" exact="0" />
-					<set_value name="md.WarehouseFleets.Config.$isConfigSet" exact="true" />
-				</do_if> -->
 				<signal_cue_instantly cue="md.Simple_Menu_API.Register_Options_Menu"
 					param="table[
 						$id = 'WarehouseFleetsConfigMenu',

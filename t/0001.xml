@@ -3,11 +3,12 @@
 	<page id="1223613" voice="no">
 		<!-- order -->
 		<t id="12300">Home Warehouse</t>
-		<t id="12301">Targets</t>
-		<t id="12302">Targets \(XL\)</t>
-		<t id="12303">Targets \(L\)</t>
-		<t id="12304">Targets \(M\)</t>
-		<t id="12305">Supply Targets</t>
+		<t id="12301">Target</t>
+		<t id="12302">Target \(XL\)</t>
+		<t id="12303">Target \(L\)</t>
+		<t id="12304">Target \(M\)</t>
+		<t id="12311">Excluded Station</t>
+		<t id="12305">Supply Target</t>
 		<t id="12306">Min. Cargo Usage \(%\)</t>
 		<t id="12307">Prio: Distribute</t>
 		<t id="12308">Prio: Supply</t>

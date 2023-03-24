@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<mdscript name="WarehouseFleets" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="C:/Users/mblei/Desktop/unpacked/libraries/md.xsd">
+<mdscript name="WarehouseFleets" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="E:/_modding/X4/_extract/_base/libraries/md.xsd">
 	<cues>
 		<!-- Startet den Main Cue, falls dieser nicht aktiv sein sollte. Passiert z.B. bei einem Reset durch Versions-Update -->
 		<cue name="Initializer" instantiate="true" checkinterval="1">
@@ -151,17 +151,7 @@
 										<sort_list list="$order.$targetsM" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
 										<sort_list list="$order.$targetsL" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
 										<sort_list list="$order.$targetsXL" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
-										<find_ship_by_true_owner space="player.galaxy" faction="faction.player" multiple="true" name="$otherShips" excluded="$thisShip" />
-										<do_for_each in="$otherShips" name="$otherShip">
-											<do_if value="$otherShip.defaultorder.id == 'WarehouseFleet'">
-												<debug_to_file chance="global.$debugchance" name="'scheduler'" directory="'WarehouseFleets'" text="'Syncing params ' + $thisShip.idcode + ' -> ' + $otherShip.idcode" output="false" append="true" />
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'accountThreshold'" value="$order.$accountThreshold" /> -->
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'transferToPlayer'" value="$order.$transferToPlayer" /> -->
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'stationAccountMaxThreshold'" value="$order.$stationAccountMaxThreshold" /> -->
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'transferToStation'" value="$order.$transferToStation" /> -->
-												<!-- <edit_order_param order="$otherShip.defaultorder" param="'stationAccountMinThreshold'" value="$order.$stationAccountMinThreshold" /> -->
-											</do_if>
-										</do_for_each>
+										<sort_list list="$order.$excludedStations" sortbyvalue="(if (loop.element.class == class.station) then 'AAA:' else '') + loop.element.knownname" />
 									</actions>
 								</cue>
 							</cues>
@@ -303,6 +293,9 @@
 						</run_actions>
 					</do_elseif>
 				</do_elseif>
+				<do_for_each in="$order.$excludedStations" name="$excludedStation">
+					<remove_from_list name="$targetStations" exact="$excludedStation" />
+				</do_for_each>
 				<remove_from_list name="$targetStations" exact="$sourceStation" />
 
 				<!-- Warenliste für Push-Trades erstellen -->

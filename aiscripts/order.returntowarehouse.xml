@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<aiscript name="ReturnToWarehouse" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="C:/Spiele/Steam/steamapps/common/X4 Foundations/unpacked/libraries/aiscripts.xsd" version="6">
+<aiscript name="ReturnToWarehouse" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="E:/_modding/X4/_extract/_base/libraries/aiscripts.xsd" version="6">
 
 	<order id="ReturnToWarehouse" name="Return to Warehouse" description="Return to Warehouse" category="internal">
 		<params>
