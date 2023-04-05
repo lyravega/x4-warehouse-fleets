@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<aiscript name="WarehouseFleet" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="E:/_modding/X4/_extract/_base/libraries/aiscripts.xsd" version="38">
+<aiscript name="WarehouseFleet" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="E:/_modding/X4/_extract/_base/libraries/aiscripts.xsd" version="40">
 
 	<order id="WarehouseFleet" name="WarehouseFleet" description="Warehouse Fleet" category="trade" infinite="true">
 		<params>
@@ -48,21 +48,6 @@
 				<input_param name="min" value="0" />
 				<input_param name="max" value="90" />
 			</param>
-			<!-- <param name="accountThreshold" type="number" default="1" text="{1223613,36701}">
-				<input_param name="min" value="0" />
-				<input_param name="max" value="100" />
-			</param> -->
-			<!-- <param name="transferToPlayer" type="bool" default="false" text="{1223613,36702}" /> -->
-			<!-- <param name="stationAccountMaxThreshold" type="number" default="1" text="{1223613,36703}">
-				<input_param name="min" value="0" />
-				<input_param name="max" value="100" />
-			</param> -->
-			<!-- <param name="transferToStation" type="bool" default="false" text="{1223613,36704}" /> -->
-			<!-- <param name="stationAccountMinThreshold" type="number" default="0" text="{1223613,36705}">
-				<input_param name="min" value="0" />
-				<input_param name="max" value="100" />
-			</param> -->
-
 		</params>
 		<requires>
 			<match shiptype="shiptype.lasertower" negate="true" />
@@ -89,6 +74,11 @@
 	<patch sinceversion="38">
 		<set_value name="$prioSupply" exact="5" />
 		<set_value name="$supplyTargets" exact="[]" />
+	</patch>
+
+	<patch sinceversion="40">
+		<set_value name="$targetsXL" exact="[]" />
+		<set_value name="$excludedStations" exact="[]" />
 	</patch>
 
 	<attention min="unknown">

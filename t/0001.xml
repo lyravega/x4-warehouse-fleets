@@ -7,13 +7,13 @@
 		<t id="12302">Target \(XL\)</t>
 		<t id="12303">Target \(L\)</t>
 		<t id="12304">Target \(M\)</t>
-		<t id="12311">Excluded Station</t>
 		<t id="12305">Supply Target</t>
 		<t id="12306">Min. Cargo Usage \(%\)</t>
 		<t id="12307">Prio: Distribute</t>
 		<t id="12308">Prio: Supply</t>
 		<t id="12309">Prio: Trade</t>
 		<t id="12310">Trades: Gate Penalty \(%\)</t>
+		<t id="12311">Excluded Station</t>
 		<!-- config -->
 		<t id="36700">lyr: WarehouseFleets</t>
 		<t id="36701">Player Account Threshold</t>
@@ -26,5 +26,17 @@
 		<t id="46704">Enable/Disable auto-transfer of credits from Player account to Warehouse accounts</t>
 		<t id="36705">Station Min Account Threshold</t>
 		<t id="46705">If 'Transfer to Station' is enabled, auto-transfers will occur when Warehouse account drops below this amount. Auto-transfers up to the minimum amount.</t>
+		<t id="36706">Cargo Emptying Routine</t>
+		<t id="46706">Trade orders may fail and leave cargo unhandled in the ships. Select the method of cargo auto-handling below\n\n</t>
+		<t id="36707">Refund (Default)</t>
+		<t id="46707">Refund: Wares are refunded back to the Player based on their average prices. Shows up as a Transfer on the transaction log\n\n</t>
+		<t id="36708">Teleport</t>
+		<t id="46708">Teleport: Wares are teleported to the Warehouse\n\n</t>
+		<t id="36709">Destroy</t>
+		<t id="46709">Destroy: Wares are destroyed\n\n</t>
+		<t id="36710">Return</t>
+		<t id="46710">Return: Wares are returned to the Warehouse through trade orders\n\n</t>
+		<t id="36711">Drop</t>
+		<t id="46711">Drop: Wares are dropped\n\n</t>
 	</page>
 </language>
